@@ -6,6 +6,16 @@ Moka v1 is a 109,569-parameter policy and value network for 9×9 Go. Its 112 KB 
 
 Moka was distilled from KataGo b6c96 using teacher games and positions reached by Moka’s own rollouts. It matches KataGo’s preferred move on 46.3% of held-out positions.
 
+## Browser payload
+
+| Path                | Weights | Runtime | Total load |
+| ------------------- | ------: | ------: | ---------: |
+| Moka v1 · INT8      |  100 KB |    8 KB |     108 KB |
+| Moka v1 · Float32   |  438 KB |    8 KB |    ≈447 KB |
+| KataGo b6c96 · ONNX |  4.1 MB | 12.8 MB |    17.0 MB |
+
+Moka’s browser path is about 157× smaller than the teacher path. The point is not to replace KataGo. It is to put a learned Go player inside an ordinary webpage.
+
 ## Setup
 
 ```sh
