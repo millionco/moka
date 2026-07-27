@@ -159,7 +159,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument(
         "--teacher",
         type=Path,
-        default=Path("public/models/katago-b6c96.onnx"),
+        default=Path("teachers/katago-b6c96.onnx"),
     )
     argument_parser.add_argument("--strong-teacher-checkpoint", type=Path)
     argument_parser.add_argument(

@@ -3,13 +3,5 @@ __pycache__/
 node_modules/
 checkpoints/
 data/
-dist/*
-!dist/arena/
-dist/arena/*
-!dist/arena/go-model.bin
-!dist/arena/go-model.json
+dist/
 teachers/
-public/models/moka-worker.js
-web/dist/
-web-dist/
-wasm/target/
