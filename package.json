@@ -1,0 +1,24 @@
+{
+  "name": "moka",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "arena": "vp dev --host 0.0.0.0 --port 4174",
+    "build": "vp build",
+    "build:worker": "vp build --config site-worker.vite.config.ts",
+    "check": "vp check",
+    "check:fix": "vp check --fix"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.25.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^20",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5",
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.2.6",
+    "vite-plus": "latest"
+  },
+  "packageManager": "pnpm@11.17.0"
+}
