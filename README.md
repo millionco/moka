@@ -2,9 +2,21 @@
 
 A very cute Go-playing model.
 
-Moka v1 is a 109,569-parameter policy and value network for 9×9 Go. Its 112 KB INT8 weights run entirely in the browser. We estimate it plays around 10 kyu.
+Moka v1 is a 109,569-parameter policy and value network for 9×9 Go. Its 112,432-byte INT8 checkpoint compresses to a 99,718-byte download and runs entirely in a Web Worker. The raw browser policy plays around 10 kyu.
 
-Moka was distilled from KataGo b6c96 using teacher games and positions reached by Moka’s own rollouts. It matches KataGo’s preferred move on 46.3% of held-out positions.
+Moka was distilled from KataGo b6c96 using teacher positions and positions reached by Moka’s own rollouts. It matches KataGo’s preferred move on 46.3% of held-out positions.
+
+## Arena
+
+Moka’s frozen 104,129-parameter nested research checkpoint scored 52–48 against KataGo b6c96 on a sealed 100-game arena. Moka searched 512 visits per move, kept its own eight highest-policy replies at opponent nodes, and averaged all eight board symmetries.
+
+| Set                      | Moka | KataGo | Black wins | White wins | Move caps |
+| ------------------------ | ---: | -----: | ---------: | ---------: | --------: |
+| Sealed final · 100 games |   52 |     48 |         26 |         26 |         8 |
+
+Each color played every deterministic four-move opening. KataGo chose the highest-probability legal move from its native b6c96 policy; it did not run a separate search. The checkpoint and search settings were frozen before this arena was opened once, and Moka never queried KataGo during play.
+
+The nested research checkpoint and its 512-visit search are separate from the instant browser player. The browser path uses the 109,569-parameter model above and runs one evaluation per move.
 
 ## Browser payload
 
