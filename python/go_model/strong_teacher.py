@@ -9,16 +9,23 @@ from go_model.config import BOARD_AREA, BOARD_SIZE, KOMI_POINTS, POLICY_MOVE_COU
 
 
 class StrongKataGoTeacher:
-    def __init__(self, checkpoint_path: Path, source_path: Path) -> None:
+    def __init__(
+        self,
+        checkpoint_path: Path,
+        source_path: Path,
+        policy_output_index: int = 0,
+    ) -> None:
         sys.path.insert(0, str((source_path / "python").resolve()))
 
         from katago.game.board import Board
         from katago.game.features import Features
         from katago.game.gamestate import GameState as KataGoGameState
         from katago.train.load_model import load_model
+        from katago.train.model_pytorch import ExtraOutputs
 
         self.board_class = Board
         self.features_class = Features
+        self.extra_outputs_class = ExtraOutputs
         self.game_state_class = KataGoGameState
         self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         model, averaged_model, _ = load_model(
@@ -30,6 +37,7 @@ class StrongKataGoTeacher:
         self.model = averaged_model or model
         self.model.eval()
         self.features = Features(self.model.config, BOARD_SIZE)
+        self.policy_output_index = policy_output_index
 
     def create_teacher_game_state(self, game_state: GameState):
         rules = self.game_state_class.RULES_TT.copy()
@@ -55,6 +63,15 @@ class StrongKataGoTeacher:
         self,
         game_states: list[GameState],
     ) -> list[tuple[np.ndarray, float]]:
+        return [
+            (evaluation[0], evaluation[1])
+            for evaluation in self.evaluate_batch_with_auxiliary(game_states)
+        ]
+
+    def evaluate_batch_with_auxiliary(
+        self,
+        game_states: list[GameState],
+    ) -> list[tuple[np.ndarray, float, np.ndarray, float, float, np.ndarray]]:
         feature_pairs = [
             self.create_teacher_game_state(game_state).get_input_features(self.features)
             for game_state in game_states
@@ -69,6 +86,7 @@ class StrongKataGoTeacher:
         )
 
         with torch.inference_mode():
+            extra_outputs = self.extra_outputs_class(["trunkfinal"])
             raw_outputs = self.model(
                 torch.tensor(
                     spatial_features,
@@ -80,12 +98,30 @@ class StrongKataGoTeacher:
                     dtype=torch.float32,
                     device=self.device,
                 ),
+                extra_outputs=extra_outputs,
             )
             outputs = self.model.postprocess_output(raw_outputs)[0]
-            policy_logits = outputs[0][:, 0].cpu().numpy()
+            policy_logits = outputs[0][
+                :,
+                self.policy_output_index,
+            ].cpu().numpy()
             value_probabilities = torch.softmax(outputs[1], dim=1).cpu().numpy()
+            short_value_probabilities = (
+                torch.softmax(outputs[2][:, 2], dim=1).cpu().numpy()
+            )
+            ownerships = torch.tanh(outputs[4][:, 0]).cpu().numpy()
+            score_means = outputs[8].cpu().numpy()
+            trunk_values = extra_outputs.returned["trunkfinal"]
+            attention_values = torch.mean(torch.square(trunk_values), dim=1)
+            attention_values /= torch.sqrt(
+                torch.sum(torch.square(attention_values), dim=(1, 2), keepdim=True)
+                + torch.finfo(attention_values.dtype).eps
+            )
+            attentions = attention_values.cpu().numpy()
 
-        evaluations: list[tuple[np.ndarray, float]] = []
+        evaluations: list[
+            tuple[np.ndarray, float, np.ndarray, float, float, np.ndarray]
+        ] = []
 
         for game_index, game_state in enumerate(game_states):
             legal_moves = get_legal_moves(game_state)
@@ -99,6 +135,19 @@ class StrongKataGoTeacher:
                 value_probabilities[game_index, 0]
                 - value_probabilities[game_index, 1]
             )
-            evaluations.append((policy_probabilities, perspective_value))
+            short_value = float(
+                short_value_probabilities[game_index, 0]
+                - short_value_probabilities[game_index, 1]
+            )
+            evaluations.append(
+                (
+                    policy_probabilities,
+                    perspective_value,
+                    ownerships[game_index].astype(np.float32),
+                    short_value,
+                    float(score_means[game_index]),
+                    attentions[game_index].astype(np.float32),
+                )
+            )
 
         return evaluations

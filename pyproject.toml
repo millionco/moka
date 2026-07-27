@@ -13,10 +13,17 @@ go-arena = "go_model.arena:main"
 go-average = "go_model.average:main"
 go-benchmark = "go_model.benchmark:main"
 go-collect = "go_model.collect:main"
+go-diagnose = "go_model.diagnose:main"
 go-export = "go_model.export:main"
 go-generate = "go_model.generate:main"
+go-outcomes = "go_model.outcomes:main"
+go-phase = "go_model.phase:main"
+go-policy = "go_model.policy:main"
 go-reweight = "go_model.reweight:main"
+go-search-generate = "go_model.search_generate:main"
+go-search-collect = "go_model.search_collect:main"
 go-train = "go_model.train:main"
+go-value = "go_model.value:main"
 
 [build-system]
 requires = ["hatchling"]

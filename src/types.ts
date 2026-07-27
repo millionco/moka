@@ -12,10 +12,12 @@ declare global {
 
   interface GoModelArchitecture {
     boardSize: number;
+    bottleneckChannelCount?: number;
     inputPlaneCount: number;
     policyChannelCount: number;
     policyMoveCount: number;
     residualBlockCount: number;
+    residualBlockKind?: "nested-bottleneck" | "standard";
     scoreHiddenChannelCount: number;
     trunkChannelCount: number;
     valueChannelCount: number;
@@ -49,7 +51,8 @@ declare global {
 
   interface GoModelTensorManifest {
     dataOffset: number;
-    dtype: "float32" | "int8";
+    dtype: "float32" | "int4" | "int8";
+    quantizationGroupSize?: number;
     scaleOffset?: number;
     shape: number[];
   }

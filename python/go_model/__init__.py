@@ -1,4 +1,3 @@
-from go_model.model import StudentNetwork
+from go_model.model import MokaNetwork
 
-__all__ = ["StudentNetwork"]
-
+__all__ = ["MokaNetwork"]

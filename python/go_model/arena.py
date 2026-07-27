@@ -21,10 +21,28 @@ from go_model.config import (
     BOARD_AREA,
     MAXIMUM_GAME_MOVE_COUNT,
     MINIMUM_TEACHER_PASS_MOVE_COUNT,
+    SEARCH_AREA_VALUE_WEIGHT,
+    SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
+    SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    SEARCH_OPPONENT_BRANCH_COUNT,
+    SEARCH_PUCT_EXPLORATION,
+    SEARCH_PUCT_VALUE_WEIGHT,
+    SEARCH_ROLLOUT_DEPTH,
+    SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
 )
-from go_model.features import encode_student_features
-from go_model.model import StudentNetwork
-from go_model.search import MokaEvaluator, select_policy_value_move, select_search_move
+from go_model.features import (
+    encode_moka_context_features,
+    encode_moka_features,
+)
+from go_model.model import MokaNetwork, create_moka_network
+from go_model.search import (
+    MokaEvaluator,
+    MokaSearchSession,
+    MokaSequentialHalvingSearchSession,
+    select_policy_value_move,
+    select_rollout_move,
+    select_search_move,
+)
 from go_model.teacher import KataGoTeacher
 
 
@@ -50,13 +68,27 @@ def create_opening_game_state(game_index: int, opening_offset: int) -> GameState
     return game_state
 
 
-def select_student_move(
-    model: StudentNetwork,
+def select_moka_move(
+    model: MokaNetwork,
     evaluator: MokaEvaluator,
     game_state: GameState,
     simulation_count: int,
     lookahead_candidate_count: int,
+    use_context_features: bool,
+    rollout_candidate_count: int,
+    rollout_count: int,
+    random_seed: int,
+    search_session: MokaSearchSession | None,
 ) -> int:
+    if rollout_count > 0:
+        return select_rollout_move(
+            evaluator,
+            game_state,
+            rollout_candidate_count,
+            rollout_count,
+            random_seed,
+        )
+
     if lookahead_candidate_count > 0:
         return select_policy_value_move(
             evaluator,
@@ -65,9 +97,15 @@ def select_student_move(
         )
 
     if simulation_count > 0:
+        if search_session is not None:
+            return search_session.select_move(game_state, simulation_count)
         return select_search_move(evaluator, game_state, simulation_count)
 
-    features = encode_student_features(game_state)
+    features = (
+        encode_moka_context_features(game_state)
+        if use_context_features
+        else encode_moka_features(game_state)
+    )
     policy_logits, _ = model(mx.array(features[None], dtype=mx.float32))
     mx.eval(policy_logits)
     logits = np.asarray(policy_logits)[0]
@@ -98,13 +136,53 @@ def run_arena(
     simulation_count: int,
     lookahead_candidate_count: int,
     opening_offset: int,
+    use_nested_network: bool,
+    use_spatial_network: bool,
+    use_recurrent_network: bool,
+    use_context_network: bool,
+    use_wide_network: bool,
+    rollout_candidate_count: int,
+    rollout_count: int,
+    search_exploration: float = SEARCH_PUCT_EXPLORATION,
+    search_value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
+    search_area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
+    search_rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
+    sequential_halving_candidate_count: int = (
+        SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT
+    ),
+    use_symmetry_ensemble: bool = False,
+    symmetry_rotation_count: int = 0,
+    should_flip_symmetry: bool = False,
+    adaptive_max_simulation_count: int = (
+        SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT
+    ),
+    adaptive_visit_margin_ratio: float = SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    use_global_pool_network: bool = False,
+    opponent_branch_count: int = SEARCH_OPPONENT_BRANCH_COUNT,
 ) -> tuple[int, int, int]:
-    model = StudentNetwork()
-    model.load_weights(str(checkpoint_path))
+    model = create_moka_network(
+        use_nested_network,
+        use_spatial_network,
+        use_recurrent_network,
+        use_context_network,
+        use_wide_network,
+        use_global_pool_network,
+    )
+    model.load_weights(
+        str(checkpoint_path),
+        strict=not use_spatial_network,
+    )
     model.eval()
     teacher = KataGoTeacher(teacher_path)
-    evaluator = MokaEvaluator(model)
+    evaluator = MokaEvaluator(
+        model,
+        use_symmetry_ensemble,
+        symmetry_rotation_count,
+        should_flip_symmetry,
+    )
     moka_win_count = 0
+    moka_black_win_count = 0
+    moka_white_win_count = 0
     kata_go_win_count = 0
     move_cap_count = 0
     start_time = time.perf_counter()
@@ -112,16 +190,50 @@ def run_arena(
     for game_index in range(game_count):
         game_state = create_opening_game_state(game_index, opening_offset)
         is_moka_black = game_index % ARENA_OPENING_PAIR_SIZE == 0
+        search_session = (
+            (
+                MokaSequentialHalvingSearchSession(
+                    evaluator,
+                    sequential_halving_candidate_count,
+                    search_exploration,
+                    search_value_weight,
+                    search_area_value_weight,
+                    search_rollout_depth,
+                    adaptive_max_simulation_count,
+                    adaptive_visit_margin_ratio,
+                    opponent_branch_count,
+                )
+                if sequential_halving_candidate_count > 0
+                else MokaSearchSession(
+                    evaluator,
+                    search_exploration,
+                    search_value_weight,
+                    search_area_value_weight,
+                    search_rollout_depth,
+                    adaptive_max_simulation_count,
+                    adaptive_visit_margin_ratio,
+                    opponent_branch_count,
+                )
+            )
+            if simulation_count > 0
+            else None
+        )
 
         while not is_game_over(game_state):
             is_moka_turn = (game_state.next_color == 1) == is_moka_black
             move = (
-                select_student_move(
+                select_moka_move(
                     model,
                     evaluator,
                     game_state,
                     simulation_count,
                     lookahead_candidate_count,
+                    use_context_network,
+                    rollout_candidate_count,
+                    rollout_count,
+                    (game_index + 1) * ARENA_OPENING_MOVE_MULTIPLIER
+                    + game_state.move_count,
+                    search_session,
                 )
                 if is_moka_turn
                 else select_teacher_move(teacher, game_state)
@@ -136,12 +248,16 @@ def run_arena(
         did_black_win = get_area_score(game_state) > 0
         did_moka_win = did_black_win == is_moka_black
         moka_win_count += int(did_moka_win)
+        moka_black_win_count += int(did_moka_win and is_moka_black)
+        moka_white_win_count += int(did_moka_win and not is_moka_black)
         kata_go_win_count += int(not did_moka_win)
         move_cap_count += int(game_state.move_count >= MAXIMUM_GAME_MOVE_COUNT)
 
     duration_seconds = time.perf_counter() - start_time
     print(
         f"Moka={moka_win_count} "
+        f"black={moka_black_win_count} "
+        f"white={moka_white_win_count} "
         f"KataGo={kata_go_win_count} "
         f"caps={move_cap_count} "
         f"seconds={duration_seconds:.1f}"
@@ -155,7 +271,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument(
         "--teacher",
         type=Path,
-        default=Path("teachers/katago-b6c96.onnx"),
+        default=Path("../public/models/katago-b6c96.onnx"),
     )
     argument_parser.add_argument(
         "--games",
@@ -163,8 +279,59 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=ARENA_DEFAULT_GAME_COUNT,
     )
     argument_parser.add_argument("--simulations", type=int, default=0)
+    argument_parser.add_argument(
+        "--search-exploration",
+        type=float,
+        default=SEARCH_PUCT_EXPLORATION,
+    )
+    argument_parser.add_argument(
+        "--search-value-weight",
+        type=float,
+        default=SEARCH_PUCT_VALUE_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--search-area-value-weight",
+        type=float,
+        default=SEARCH_AREA_VALUE_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--search-rollout-depth",
+        type=int,
+        default=SEARCH_ROLLOUT_DEPTH,
+    )
+    argument_parser.add_argument(
+        "--sequential-halving-candidates",
+        type=int,
+        default=SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
+    )
+    argument_parser.add_argument("--symmetry-ensemble", action="store_true")
+    argument_parser.add_argument("--symmetry-rotation", type=int, default=0)
+    argument_parser.add_argument("--symmetry-flip", action="store_true")
+    argument_parser.add_argument(
+        "--adaptive-max-simulations",
+        type=int,
+        default=SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
+    )
+    argument_parser.add_argument(
+        "--adaptive-visit-margin",
+        type=float,
+        default=SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    )
+    argument_parser.add_argument(
+        "--opponent-branches",
+        type=int,
+        default=SEARCH_OPPONENT_BRANCH_COUNT,
+    )
     argument_parser.add_argument("--lookahead-candidates", type=int, default=0)
+    argument_parser.add_argument("--rollout-candidates", type=int, default=4)
+    argument_parser.add_argument("--rollouts", type=int, default=0)
     argument_parser.add_argument("--opening-offset", type=int, default=0)
+    argument_parser.add_argument("--nested", action="store_true")
+    argument_parser.add_argument("--spatial", action="store_true")
+    argument_parser.add_argument("--recurrent", action="store_true")
+    argument_parser.add_argument("--context", action="store_true")
+    argument_parser.add_argument("--wide", action="store_true")
+    argument_parser.add_argument("--global-pool", action="store_true")
     return argument_parser
 
 
@@ -177,6 +344,25 @@ def main() -> None:
         arguments.simulations,
         arguments.lookahead_candidates,
         arguments.opening_offset,
+        arguments.nested,
+        arguments.spatial,
+        arguments.recurrent,
+        arguments.context,
+        arguments.wide,
+        arguments.rollout_candidates,
+        arguments.rollouts,
+        arguments.search_exploration,
+        arguments.search_value_weight,
+        arguments.search_area_value_weight,
+        arguments.search_rollout_depth,
+        arguments.sequential_halving_candidates,
+        arguments.symmetry_ensemble,
+        arguments.symmetry_rotation,
+        arguments.symmetry_flip,
+        arguments.adaptive_max_simulations,
+        arguments.adaptive_visit_margin,
+        arguments.global_pool,
+        arguments.opponent_branches,
     )
 
 

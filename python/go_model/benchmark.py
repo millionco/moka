@@ -7,7 +7,7 @@ import mlx.core as mx
 import numpy as np
 
 from go_model.config import BOARD_SIZE, INPUT_PLANE_COUNT
-from go_model.model import StudentNetwork
+from go_model.model import MokaNetwork
 
 
 def percentile(values: list[float], percentile_value: float) -> float:
@@ -17,7 +17,7 @@ def percentile(values: list[float], percentile_value: float) -> float:
 
 
 def benchmark(checkpoint_path: Path, iteration_count: int) -> None:
-    model = StudentNetwork()
+    model = MokaNetwork()
 
     if checkpoint_path.exists():
         model.load_weights(str(checkpoint_path))
@@ -58,7 +58,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=Path("checkpoints/go-model.safetensors"),
+        default=Path("checkpoints/moka-model.safetensors"),
     )
     argument_parser.add_argument("--iterations", type=int, default=200)
     return argument_parser
@@ -71,4 +71,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -20,33 +20,51 @@ class KataGoTeacher:
         )
 
     def evaluate(self, game_state: GameState) -> tuple[np.ndarray, float]:
-        spatial_features, global_features = encode_teacher_features(game_state)
+        return self.evaluate_batch([game_state])[0]
+
+    def evaluate_batch(
+        self,
+        game_states: list[GameState],
+    ) -> list[tuple[np.ndarray, float]]:
+        feature_pairs = [
+            encode_teacher_features(game_state) for game_state in game_states
+        ]
+        spatial_features = np.stack(
+            [feature_pair[0] for feature_pair in feature_pairs]
+        )
+        global_features = np.stack(
+            [feature_pair[1] for feature_pair in feature_pairs]
+        )
         policy, pass_policy, value = self.session.run(
             ["policy", "policy_pass", "value"],
             {
-                "input_spatial": spatial_features.reshape(
-                    1,
-                    spatial_features.shape[0],
-                    BOARD_SIZE,
-                    BOARD_SIZE,
-                ),
-                "input_global": global_features.reshape(1, global_features.shape[0]),
+                "input_spatial": spatial_features,
+                "input_global": global_features,
             },
         )
-        policy_logits = np.concatenate(
-            [policy.reshape(BOARD_AREA), pass_policy.reshape(1)]
-        ).astype(np.float32)
-        legal_moves = get_legal_moves(game_state)
-        masked_logits = np.full(POLICY_MOVE_COUNT, -1e9, dtype=np.float32)
-        masked_logits[legal_moves] = policy_logits[legal_moves]
-        maximum_logit = float(np.max(masked_logits[legal_moves]))
-        policy_probabilities = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
-        legal_probabilities = np.exp(masked_logits[legal_moves] - maximum_logit)
-        legal_probabilities /= np.sum(legal_probabilities)
-        policy_probabilities[legal_moves] = legal_probabilities
-        value_logits = value.reshape(-1)[:2]
-        value_probabilities = np.exp(value_logits - np.max(value_logits))
-        value_probabilities /= np.sum(value_probabilities)
-        perspective_value = float(value_probabilities[0] - value_probabilities[1])
-        return policy_probabilities, perspective_value
+        evaluations: list[tuple[np.ndarray, float]] = []
 
+        for game_index, game_state in enumerate(game_states):
+            policy_logits = np.concatenate(
+                [
+                    policy[game_index].reshape(BOARD_AREA),
+                    pass_policy[game_index].reshape(1),
+                ]
+            ).astype(np.float32)
+            legal_moves = get_legal_moves(game_state)
+            maximum_logit = float(np.max(policy_logits[legal_moves]))
+            legal_probabilities = np.exp(
+                policy_logits[legal_moves] - maximum_logit
+            )
+            legal_probabilities /= np.sum(legal_probabilities)
+            policy_probabilities = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
+            policy_probabilities[legal_moves] = legal_probabilities
+            value_logits = value[game_index].reshape(-1)[:2]
+            value_probabilities = np.exp(value_logits - np.max(value_logits))
+            value_probabilities /= np.sum(value_probabilities)
+            perspective_value = float(
+                value_probabilities[0] - value_probabilities[1]
+            )
+            evaluations.append((policy_probabilities, perspective_value))
+
+        return evaluations

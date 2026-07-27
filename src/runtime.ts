@@ -1,13 +1,36 @@
 import {
   GO_MODEL_KERNEL_RADIUS,
   GO_MODEL_KERNEL_SIZE,
+  GO_MODEL_INT4_FORMAT,
+  GO_MODEL_INT4_NIBBLE_BITS,
+  GO_MODEL_INT4_NIBBLE_MASK,
+  GO_MODEL_INT4_VALUES_PER_BYTE,
+  GO_MODEL_INT4_ZERO_POINT,
+  GO_MODEL_INT8_FORMAT,
+  GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND,
   GO_MODEL_POLICY_KERNEL_SIZE,
+  GO_MODEL_STANDARD_RESIDUAL_BLOCK_KIND,
   GO_MODEL_VALUE_KERNEL_SIZE,
   GO_MODEL_VERSION,
-} from "./constants";
+} from "./runtime-constants";
 
 const getElementCount = (shape: number[]) =>
   shape.reduce((elementCount, dimension) => elementCount * dimension, 1);
+
+const isSupportedManifest = (manifest: GoModelManifest) => {
+  const residualBlockKind =
+    manifest.architecture.residualBlockKind ?? GO_MODEL_STANDARD_RESIDUAL_BLOCK_KIND;
+  const isResidualBlockSupported =
+    residualBlockKind === GO_MODEL_STANDARD_RESIDUAL_BLOCK_KIND ||
+    (residualBlockKind === GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND &&
+      (manifest.architecture.bottleneckChannelCount ?? 0) > 0);
+
+  return (
+    (manifest.format === GO_MODEL_INT4_FORMAT || manifest.format === GO_MODEL_INT8_FORMAT) &&
+    manifest.version === GO_MODEL_VERSION &&
+    isResidualBlockSupported
+  );
+};
 
 const applyRelu = (values: Float32Array) => {
   for (let valueIndex = 0; valueIndex < values.length; valueIndex += 1) {
@@ -121,11 +144,7 @@ class GoModelRuntime {
     const manifest: GoModelManifest = await manifestResponse.json();
     const weightsBuffer = await weightsResponse.arrayBuffer();
 
-    if (
-      manifest.format !== "million-go-int8" ||
-      manifest.version !== GO_MODEL_VERSION ||
-      weightsBuffer.byteLength !== manifest.weightsBytes
-    ) {
+    if (!isSupportedManifest(manifest) || weightsBuffer.byteLength !== manifest.weightsBytes) {
       throw new Error("Unsupported or incomplete Go model.");
     }
 
@@ -133,11 +152,7 @@ class GoModelRuntime {
   };
 
   static create = (manifest: GoModelManifest, weightsBuffer: ArrayBuffer) => {
-    if (
-      manifest.format !== "million-go-int8" ||
-      manifest.version !== GO_MODEL_VERSION ||
-      weightsBuffer.byteLength !== manifest.weightsBytes
-    ) {
+    if (!isSupportedManifest(manifest) || weightsBuffer.byteLength !== manifest.weightsBytes) {
       throw new Error("Unsupported or incomplete Go model.");
     }
 
@@ -160,17 +175,29 @@ class GoModelRuntime {
 
       const outputChannelCount = tensorManifest.shape[0];
       const valuesPerOutputChannel = elementCount / outputChannelCount;
-      const quantizedValues = new Int8Array(weightsBuffer, tensorManifest.dataOffset, elementCount);
+      const quantizationGroupSize = tensorManifest.quantizationGroupSize ?? valuesPerOutputChannel;
+      const groupCount = Math.ceil(valuesPerOutputChannel / quantizationGroupSize);
       const scales = new Float32Array(
         weightsBuffer,
         tensorManifest.scaleOffset,
-        outputChannelCount,
+        outputChannelCount * groupCount,
       );
       const values = new Float32Array(elementCount);
+      const int8Values =
+        tensorManifest.dtype === "int8"
+          ? new Int8Array(weightsBuffer, tensorManifest.dataOffset, elementCount)
+          : null;
+      const int4Values =
+        tensorManifest.dtype === "int4"
+          ? new Uint8Array(
+              weightsBuffer,
+              tensorManifest.dataOffset,
+              Math.ceil(elementCount / GO_MODEL_INT4_VALUES_PER_BYTE),
+            )
+          : null;
 
       for (let outputChannel = 0; outputChannel < outputChannelCount; outputChannel += 1) {
         const outputOffset = outputChannel * valuesPerOutputChannel;
-        const scale = scales[outputChannel];
 
         for (
           let channelValueIndex = 0;
@@ -178,7 +205,20 @@ class GoModelRuntime {
           channelValueIndex += 1
         ) {
           const valueIndex = outputOffset + channelValueIndex;
-          values[valueIndex] = quantizedValues[valueIndex] * scale;
+          const packedValue = int4Values?.[Math.floor(valueIndex / GO_MODEL_INT4_VALUES_PER_BYTE)];
+          const encodedInt4Value =
+            packedValue === undefined
+              ? 0
+              : valueIndex % GO_MODEL_INT4_VALUES_PER_BYTE === 0
+                ? packedValue & GO_MODEL_INT4_NIBBLE_MASK
+                : packedValue >> GO_MODEL_INT4_NIBBLE_BITS;
+          const quantizedValue =
+            int8Values?.[valueIndex] ?? encodedInt4Value - GO_MODEL_INT4_ZERO_POINT;
+          const scale =
+            scales[
+              outputChannel * groupCount + Math.floor(channelValueIndex / quantizationGroupSize)
+            ];
+          values[valueIndex] = quantizedValue * scale;
         }
       }
 
@@ -218,28 +258,56 @@ class GoModelRuntime {
       residualBlockIndex += 1
     ) {
       const prefix = `residual.${residualBlockIndex}`;
+      const isNestedBlock = architecture.residualBlockKind === GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND;
+      const bottleneckChannelCount = architecture.bottleneckChannelCount ?? 0;
+      const firstBlockInputs = isNestedBlock
+        ? applyRelu(
+            convolve(
+              trunkValues,
+              architecture.boardSize,
+              architecture.trunkChannelCount,
+              bottleneckChannelCount,
+              GO_MODEL_POLICY_KERNEL_SIZE,
+              0,
+              tensor(`${prefix}.reduce.weight`),
+              tensor(`${prefix}.reduce.bias`),
+            ),
+          )
+        : trunkValues;
       const hiddenValues = applyRelu(
         convolve(
-          trunkValues,
+          firstBlockInputs,
           architecture.boardSize,
-          architecture.trunkChannelCount,
-          architecture.trunkChannelCount,
+          isNestedBlock ? bottleneckChannelCount : architecture.trunkChannelCount,
+          isNestedBlock ? bottleneckChannelCount : architecture.trunkChannelCount,
           GO_MODEL_KERNEL_SIZE,
           GO_MODEL_KERNEL_RADIUS,
           tensor(`${prefix}.first.weight`),
           tensor(`${prefix}.first.bias`),
         ),
       );
-      const residualValues = convolve(
+      const secondBlockValues = convolve(
         hiddenValues,
         architecture.boardSize,
-        architecture.trunkChannelCount,
-        architecture.trunkChannelCount,
+        isNestedBlock ? bottleneckChannelCount : architecture.trunkChannelCount,
+        isNestedBlock ? bottleneckChannelCount : architecture.trunkChannelCount,
         GO_MODEL_KERNEL_SIZE,
         GO_MODEL_KERNEL_RADIUS,
         tensor(`${prefix}.second.weight`),
         tensor(`${prefix}.second.bias`),
       );
+      const residualValues = isNestedBlock
+        ? convolve(
+            applyRelu(secondBlockValues),
+            architecture.boardSize,
+            bottleneckChannelCount,
+            architecture.trunkChannelCount,
+            GO_MODEL_POLICY_KERNEL_SIZE,
+            0,
+            tensor(`${prefix}.expand.weight`),
+            tensor(`${prefix}.expand.bias`),
+          )
+        : secondBlockValues;
       trunkValues = addAndApplyRelu(trunkValues, residualValues);
     }
 
