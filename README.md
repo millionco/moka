@@ -16,6 +16,17 @@ Moka was distilled from KataGo b6c96 using teacher games and positions reached b
 
 Moka’s browser path is about 157× smaller than the teacher path. The point is not to replace KataGo. It is to put a learned Go player inside an ordinary webpage.
 
+## Browser performance
+
+| Metric         | Latency |
+| -------------- | ------: |
+| Initialization | 10.0 ms |
+| Mean inference |  9.6 ms |
+| p50 inference  |  9.4 ms |
+| p95 inference  | 10.6 ms |
+
+These are the medians of five Chromium runs on Apple Silicon. Each run measured 100 positions after 10 warmups. Latency includes Worker messaging; inference stays off the main thread.
+
 ## Setup
 
 ```sh
