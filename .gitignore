@@ -3,5 +3,11 @@ __pycache__/
 node_modules/
 checkpoints/
 data/
+analysis_logs/
+gtp_logs/
+autoresearch/rigor-ledger.jsonl
+autoresearch/runs/
 dist/
 teachers/
+web-dist/
+wasm/target/

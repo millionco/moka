@@ -4,15 +4,18 @@ from go_model.board import GameState, get_group
 from go_model.config import (
     BOARD_AREA,
     BOARD_SIZE,
+    CONTEXT_INPUT_PLANE_COUNT,
+    CONTEXT_RECENT_MOVE_COUNT,
     INPUT_PLANE_COUNT,
     KOMI_NORMALIZATION_POINTS,
     KOMI_POINTS,
+    MAXIMUM_GAME_MOVE_COUNT,
+    MOKA_PERSPECTIVE_KOMI_FEATURE_INDEX,
     TEACHER_GLOBAL_FEATURE_COUNT,
     TEACHER_SPATIAL_FEATURE_COUNT,
 )
 
-
-def encode_student_features(game_state: GameState) -> np.ndarray:
+def encode_moka_features(game_state: GameState) -> np.ndarray:
     features = np.zeros(
         (BOARD_SIZE, BOARD_SIZE, INPUT_PLANE_COUNT),
         dtype=np.float32,
@@ -70,7 +73,62 @@ def encode_student_features(game_state: GameState) -> np.ndarray:
             features[:, :, 8 + history_offset] = 1
 
     perspective_komi = -KOMI_POINTS * game_state.next_color
-    features[:, :, 11] = perspective_komi / KOMI_NORMALIZATION_POINTS
+    features[:, :, MOKA_PERSPECTIVE_KOMI_FEATURE_INDEX] = (
+        perspective_komi / KOMI_NORMALIZATION_POINTS
+    )
+    return features
+
+def encode_moka_context_features(game_state: GameState) -> np.ndarray:
+    features = np.zeros(
+        (BOARD_SIZE, BOARD_SIZE, CONTEXT_INPUT_PLANE_COUNT),
+        dtype=np.float32,
+    )
+    visited_moves: set[int] = set()
+
+    for move in range(BOARD_AREA):
+        row, column = divmod(move, BOARD_SIZE)
+        color = int(game_state.board[row, column])
+
+        if color == 0:
+            continue
+
+        is_current_player = color == game_state.next_color
+        features[row, column, 0 if is_current_player else 1] = 1
+
+        if move in visited_moves:
+            continue
+
+        stones, liberties = get_group(game_state.board, move)
+        visited_moves.update(stones)
+        liberty_bucket = min(len(liberties), 3)
+
+        if liberty_bucket == 0:
+            continue
+
+        feature_index = 2 + (liberty_bucket - 1) * 2 + int(not is_current_player)
+
+        for stone_move in stones:
+            stone_row, stone_column = divmod(stone_move, BOARD_SIZE)
+            features[stone_row, stone_column, feature_index] = 1
+
+    if game_state.ko_move >= 0:
+        ko_row, ko_column = divmod(game_state.ko_move, BOARD_SIZE)
+        features[ko_row, ko_column, 8] = 1
+
+    for history_index, history_move in enumerate(
+        reversed(game_state.move_history[-CONTEXT_RECENT_MOVE_COUNT:])
+    ):
+        feature_index = 9 + history_index
+
+        if history_move == BOARD_AREA:
+            features[:, :, feature_index] = 1
+        else:
+            history_row, history_column = divmod(history_move, BOARD_SIZE)
+            features[history_row, history_column, feature_index] = 1
+
+    perspective_komi = -KOMI_POINTS * game_state.next_color
+    features[:, :, 14] = perspective_komi / KOMI_NORMALIZATION_POINTS
+    features[:, :, 15] = game_state.move_count / MAXIMUM_GAME_MOVE_COUNT
     return features
 
 

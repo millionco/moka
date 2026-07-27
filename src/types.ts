@@ -49,7 +49,8 @@ declare global {
 
   interface GoModelTensorManifest {
     dataOffset: number;
-    dtype: "float32" | "int8";
+    dtype: "float32" | "int4" | "int8";
+    quantizationGroupSize?: number;
     scaleOffset?: number;
     shape: number[];
   }

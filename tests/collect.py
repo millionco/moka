@@ -1,6 +1,13 @@
 import unittest
 
-from go_model.collect import calculate_goldilocks_weight
+import numpy as np
+
+from go_model.board import GameState, play_move
+from go_model.collect import (
+    calculate_goldilocks_weight,
+    select_greedy_rollout_move,
+)
+from go_model.config import BOARD_AREA
 
 
 class GoldilocksWeightTests(unittest.TestCase):
@@ -11,6 +18,17 @@ class GoldilocksWeightTests(unittest.TestCase):
 
         self.assertGreater(medium_difficulty_weight, easy_position_weight)
         self.assertGreater(medium_difficulty_weight, overwhelming_position_weight)
+
+    def test_greedy_rollout_respects_legal_moves(self) -> None:
+        game_state = play_move(GameState(), 0)
+        self.assertIsNotNone(game_state)
+        probabilities = np.zeros(BOARD_AREA + 1, dtype=np.float32)
+        probabilities[0] = 1
+        probabilities[1] = 0.5
+
+        selected_move = select_greedy_rollout_move(game_state, probabilities)
+
+        self.assertEqual(selected_move, 1)
 
 
 if __name__ == "__main__":

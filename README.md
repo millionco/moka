@@ -55,10 +55,19 @@ uv run go-train --data data/katago-distillation.npz --epochs 30
 uv run go-export
 ```
 
+The complete training, search, arena, and export reference is in [RESEARCH.md](RESEARCH.md). Every recorded experiment, including negative results, is in [experiment-log.md](experiment-log.md). The autonomous MLX harness is in [autoresearch](autoresearch).
+
+Run the local browser arena after placing the teacher model:
+
+```sh
+nr arena
+```
+
 ## Build
 
 ```sh
 nr build
+nr arena:build
 ```
 
 ## Test

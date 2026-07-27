@@ -182,4 +182,3 @@ def get_area_score(game_state: GameState) -> float:
             white_score += len(territory_moves)
 
     return black_score - white_score
-
