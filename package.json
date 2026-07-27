@@ -2,20 +2,46 @@
   "name": "moka",
   "version": "1.0.0",
   "private": true,
+  "description": "A very cute Go-playing model",
+  "homepage": "https://million.dev/moka",
+  "license": "MIT",
+  "author": {
+    "name": "Million",
+    "url": "https://million.dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/millionco/moka.git"
+  },
+  "files": [
+    "dist",
+    "model",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    "./model.bin": "./model/go-model.bin",
+    "./model.json": "./model/go-model.json",
+    "./worker": "./dist/worker.js",
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
   "scripts": {
-    "arena": "vp dev --host 0.0.0.0 --port 4174",
-    "build": "vp build",
-    "build:worker": "vp build --config site-worker.vite.config.ts",
+    "build": "vp pack",
+    "test": "uv run python tests/board.py && uv run python tests/features.py && uv run python tests/symmetry.py && uv run python tests/collect.py",
     "check": "vp check",
     "check:fix": "vp check --fix"
   },
-  "dependencies": {
-    "onnxruntime-web": "1.25.1"
-  },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^20",
-    "tailwindcss": "^4.3.3",
     "typescript": "^5",
     "vite": "npm:@voidzero-dev/vite-plus-core@^0.2.6",
     "vite-plus": "latest"

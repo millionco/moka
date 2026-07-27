@@ -1,0 +1,172 @@
+{
+  "architecture": {
+    "boardSize": 9,
+    "inputPlaneCount": 12,
+    "policyChannelCount": 4,
+    "policyMoveCount": 82,
+    "residualBlockCount": 4,
+    "scoreHiddenChannelCount": 32,
+    "trunkChannelCount": 32,
+    "valueChannelCount": 2
+  },
+  "format": "million-go-int8",
+  "sha256": "0a2352de4302048c9bfe4679556358c27b5aeca317da2152b0412024d7244e58",
+  "tensors": {
+    "policy.convolution.bias": {
+      "dataOffset": 79632,
+      "dtype": "float32",
+      "shape": [4]
+    },
+    "policy.convolution.weight": {
+      "dataOffset": 79488,
+      "dtype": "int8",
+      "scaleOffset": 79616,
+      "shape": [4, 1, 1, 32]
+    },
+    "policy.linear.bias": {
+      "dataOffset": 106544,
+      "dtype": "float32",
+      "shape": [82]
+    },
+    "policy.linear.weight": {
+      "dataOffset": 79648,
+      "dtype": "int8",
+      "scaleOffset": 106216,
+      "shape": [82, 324]
+    },
+    "residual.0.first.bias": {
+      "dataOffset": 13056,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "residual.0.first.weight": {
+      "dataOffset": 3712,
+      "dtype": "int8",
+      "scaleOffset": 12928,
+      "shape": [32, 3, 3, 32]
+    },
+    "residual.0.second.bias": {
+      "dataOffset": 22528,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "residual.0.second.weight": {
+      "dataOffset": 13184,
+      "dtype": "int8",
+      "scaleOffset": 22400,
+      "shape": [32, 3, 3, 32]
+    },
+    "residual.1.first.bias": {
+      "dataOffset": 32000,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "residual.1.first.weight": {
+      "dataOffset": 22656,
+      "dtype": "int8",
+      "scaleOffset": 31872,
+      "shape": [32, 3, 3, 32]
+    },
+    "residual.1.second.bias": {
+      "dataOffset": 41472,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "residual.1.second.weight": {
+      "dataOffset": 32128,
+      "dtype": "int8",
+      "scaleOffset": 41344,
+      "shape": [32, 3, 3, 32]
+    },
+    "residual.2.first.bias": {
+      "dataOffset": 50944,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "residual.2.first.weight": {
+      "dataOffset": 41600,
+      "dtype": "int8",
+      "scaleOffset": 50816,
+      "shape": [32, 3, 3, 32]
+    },
+    "residual.2.second.bias": {
+      "dataOffset": 60416,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "residual.2.second.weight": {
+      "dataOffset": 51072,
+      "dtype": "int8",
+      "scaleOffset": 60288,
+      "shape": [32, 3, 3, 32]
+    },
+    "residual.3.first.bias": {
+      "dataOffset": 69888,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "residual.3.first.weight": {
+      "dataOffset": 60544,
+      "dtype": "int8",
+      "scaleOffset": 69760,
+      "shape": [32, 3, 3, 32]
+    },
+    "residual.3.second.bias": {
+      "dataOffset": 79360,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "residual.3.second.weight": {
+      "dataOffset": 70016,
+      "dtype": "int8",
+      "scaleOffset": 79232,
+      "shape": [32, 3, 3, 32]
+    },
+    "stem.bias": {
+      "dataOffset": 3584,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "stem.weight": {
+      "dataOffset": 0,
+      "dtype": "int8",
+      "scaleOffset": 3456,
+      "shape": [32, 3, 3, 12]
+    },
+    "value.convolution.bias": {
+      "dataOffset": 106944,
+      "dtype": "float32",
+      "shape": [2]
+    },
+    "value.convolution.weight": {
+      "dataOffset": 106872,
+      "dtype": "int8",
+      "scaleOffset": 106936,
+      "shape": [2, 1, 1, 32]
+    },
+    "value.hidden.bias": {
+      "dataOffset": 112264,
+      "dtype": "float32",
+      "shape": [32]
+    },
+    "value.hidden.weight": {
+      "dataOffset": 106952,
+      "dtype": "int8",
+      "scaleOffset": 112136,
+      "shape": [32, 162]
+    },
+    "value.output.bias": {
+      "dataOffset": 112428,
+      "dtype": "float32",
+      "shape": [1]
+    },
+    "value.output.weight": {
+      "dataOffset": 112392,
+      "dtype": "int8",
+      "scaleOffset": 112424,
+      "shape": [1, 32]
+    }
+  },
+  "version": 1,
+  "weightsBytes": 112432
+}
