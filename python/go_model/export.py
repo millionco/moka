@@ -16,6 +16,8 @@ from go_model.config import (
     INT8_MAXIMUM_VALUE,
     MAXIMUM_MODEL_BYTES,
     MODEL_QUANTIZATION_BITS,
+    NESTED_BOTTLENECK_CHANNEL_COUNT,
+    NESTED_RESIDUAL_BLOCK_COUNT,
     POLICY_CHANNEL_COUNT,
     POLICY_MOVE_COUNT,
     RESIDUAL_BLOCK_COUNT,
@@ -23,10 +25,13 @@ from go_model.config import (
     TRUNK_CHANNEL_COUNT,
     VALUE_CHANNEL_COUNT,
 )
-from go_model.model import MokaNetwork
+from go_model.model import MokaNestedNetwork, MokaNetwork
 
 
-def get_named_parameters(model: MokaNetwork) -> list[tuple[str, mx.array]]:
+def get_named_parameters(
+    model: MokaNetwork,
+    use_nested_network: bool,
+) -> list[tuple[str, mx.array]]:
     named_parameters = [
         ("stem.weight", model.stem.weight),
         ("stem.bias", model.stem.bias),
@@ -34,26 +39,64 @@ def get_named_parameters(model: MokaNetwork) -> list[tuple[str, mx.array]]:
 
     for block_index, residual_block in enumerate(model.residual_blocks):
         prefix = f"residual.{block_index}"
-        named_parameters.extend(
-            [
-                (
-                    f"{prefix}.first.weight",
-                    residual_block.first_convolution.weight,
-                ),
-                (
-                    f"{prefix}.first.bias",
-                    residual_block.first_convolution.bias,
-                ),
-                (
-                    f"{prefix}.second.weight",
-                    residual_block.second_convolution.weight,
-                ),
-                (
-                    f"{prefix}.second.bias",
-                    residual_block.second_convolution.bias,
-                ),
-            ]
-        )
+        if use_nested_network:
+            named_parameters.extend(
+                [
+                    (
+                        f"{prefix}.reduce.weight",
+                        residual_block.reduce_convolution.weight,
+                    ),
+                    (
+                        f"{prefix}.reduce.bias",
+                        residual_block.reduce_convolution.bias,
+                    ),
+                    (
+                        f"{prefix}.first.weight",
+                        residual_block.first_spatial_convolution.weight,
+                    ),
+                    (
+                        f"{prefix}.first.bias",
+                        residual_block.first_spatial_convolution.bias,
+                    ),
+                    (
+                        f"{prefix}.second.weight",
+                        residual_block.second_spatial_convolution.weight,
+                    ),
+                    (
+                        f"{prefix}.second.bias",
+                        residual_block.second_spatial_convolution.bias,
+                    ),
+                    (
+                        f"{prefix}.expand.weight",
+                        residual_block.expand_convolution.weight,
+                    ),
+                    (
+                        f"{prefix}.expand.bias",
+                        residual_block.expand_convolution.bias,
+                    ),
+                ]
+            )
+        else:
+            named_parameters.extend(
+                [
+                    (
+                        f"{prefix}.first.weight",
+                        residual_block.first_convolution.weight,
+                    ),
+                    (
+                        f"{prefix}.first.bias",
+                        residual_block.first_convolution.bias,
+                    ),
+                    (
+                        f"{prefix}.second.weight",
+                        residual_block.second_convolution.weight,
+                    ),
+                    (
+                        f"{prefix}.second.bias",
+                        residual_block.second_convolution.bias,
+                    ),
+                ]
+            )
 
     named_parameters.extend(
         [
@@ -96,14 +139,15 @@ def export_model(
     checkpoint_path: Path,
     output_directory: Path,
     quantization_bits: int,
+    use_nested_network: bool = False,
 ) -> tuple[Path, Path]:
-    model = MokaNetwork()
+    model = MokaNestedNetwork() if use_nested_network else MokaNetwork()
     model.load_weights(str(checkpoint_path))
     mx.eval(model.parameters())
     binary = bytearray()
     tensors: dict[str, dict[str, object]] = {}
 
-    for name, parameter in get_named_parameters(model):
+    for name, parameter in get_named_parameters(model, use_nested_network):
         values = np.asarray(parameter, dtype=np.float32)
 
         if name.endswith(".weight"):
@@ -195,17 +239,31 @@ def export_model(
     weights_path = output_directory / "moka-model.bin"
     manifest_path = output_directory / "moka-model.json"
     weights_path.write_bytes(binary)
-    manifest = {
-        "architecture": {
+    architecture = {
             "boardSize": BOARD_SIZE,
             "inputPlaneCount": INPUT_PLANE_COUNT,
             "policyChannelCount": POLICY_CHANNEL_COUNT,
             "policyMoveCount": POLICY_MOVE_COUNT,
-            "residualBlockCount": RESIDUAL_BLOCK_COUNT,
+            "residualBlockCount": (
+                NESTED_RESIDUAL_BLOCK_COUNT
+                if use_nested_network
+                else RESIDUAL_BLOCK_COUNT
+            ),
+            "residualBlockKind": (
+                "nested-bottleneck"
+                if use_nested_network
+                else "standard"
+            ),
             "scoreHiddenChannelCount": SCORE_HIDDEN_CHANNEL_COUNT,
             "trunkChannelCount": TRUNK_CHANNEL_COUNT,
             "valueChannelCount": VALUE_CHANNEL_COUNT,
-        },
+    }
+    if use_nested_network:
+        architecture["bottleneckChannelCount"] = (
+            NESTED_BOTTLENECK_CHANNEL_COUNT
+        )
+    manifest = {
+        "architecture": architecture,
         "format": f"million-go-int{quantization_bits}",
         "sha256": hashlib.sha256(binary).hexdigest(),
         "tensors": tensors,
@@ -248,6 +306,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=8,
         type=int,
     )
+    argument_parser.add_argument("--nested", action="store_true")
     return argument_parser
 
 
@@ -257,6 +316,7 @@ def main() -> None:
         arguments.checkpoint,
         arguments.output,
         arguments.quantization_bits,
+        arguments.nested,
     )
 
 

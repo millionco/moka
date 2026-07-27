@@ -12,10 +12,12 @@ declare global {
 
   interface GoModelArchitecture {
     boardSize: number;
+    bottleneckChannelCount?: number;
     inputPlaneCount: number;
     policyChannelCount: number;
     policyMoveCount: number;
     residualBlockCount: number;
+    residualBlockKind?: "nested-bottleneck" | "standard";
     scoreHiddenChannelCount: number;
     trunkChannelCount: number;
     valueChannelCount: number;

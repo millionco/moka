@@ -7,17 +7,30 @@ import {
   GO_MODEL_INT4_VALUES_PER_BYTE,
   GO_MODEL_INT4_ZERO_POINT,
   GO_MODEL_INT8_FORMAT,
+  GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND,
   GO_MODEL_POLICY_KERNEL_SIZE,
+  GO_MODEL_STANDARD_RESIDUAL_BLOCK_KIND,
   GO_MODEL_VALUE_KERNEL_SIZE,
   GO_MODEL_VERSION,
-} from "./runtime-constants";
+} from "./runtime-constants.ts";
 
 const getElementCount = (shape: number[]) =>
   shape.reduce((elementCount, dimension) => elementCount * dimension, 1);
 
-const isSupportedManifest = (manifest: GoModelManifest) =>
-  (manifest.format === GO_MODEL_INT4_FORMAT || manifest.format === GO_MODEL_INT8_FORMAT) &&
-  manifest.version === GO_MODEL_VERSION;
+const isSupportedManifest = (manifest: GoModelManifest) => {
+  const residualBlockKind =
+    manifest.architecture.residualBlockKind ?? GO_MODEL_STANDARD_RESIDUAL_BLOCK_KIND;
+  const isResidualBlockSupported =
+    residualBlockKind === GO_MODEL_STANDARD_RESIDUAL_BLOCK_KIND ||
+    (residualBlockKind === GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND &&
+      (manifest.architecture.bottleneckChannelCount ?? 0) > 0);
+
+  return (
+    (manifest.format === GO_MODEL_INT4_FORMAT || manifest.format === GO_MODEL_INT8_FORMAT) &&
+    manifest.version === GO_MODEL_VERSION &&
+    isResidualBlockSupported
+  );
+};
 
 const applyRelu = (values: Float32Array) => {
   for (let valueIndex = 0; valueIndex < values.length; valueIndex += 1) {
@@ -245,28 +258,56 @@ class GoModelRuntime {
       residualBlockIndex += 1
     ) {
       const prefix = `residual.${residualBlockIndex}`;
+      const isNestedBlock = architecture.residualBlockKind === GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND;
+      const bottleneckChannelCount = architecture.bottleneckChannelCount ?? 0;
+      const firstBlockInputs = isNestedBlock
+        ? applyRelu(
+            convolve(
+              trunkValues,
+              architecture.boardSize,
+              architecture.trunkChannelCount,
+              bottleneckChannelCount,
+              GO_MODEL_POLICY_KERNEL_SIZE,
+              0,
+              tensor(`${prefix}.reduce.weight`),
+              tensor(`${prefix}.reduce.bias`),
+            ),
+          )
+        : trunkValues;
       const hiddenValues = applyRelu(
         convolve(
-          trunkValues,
+          firstBlockInputs,
           architecture.boardSize,
-          architecture.trunkChannelCount,
-          architecture.trunkChannelCount,
+          isNestedBlock ? bottleneckChannelCount : architecture.trunkChannelCount,
+          isNestedBlock ? bottleneckChannelCount : architecture.trunkChannelCount,
           GO_MODEL_KERNEL_SIZE,
           GO_MODEL_KERNEL_RADIUS,
           tensor(`${prefix}.first.weight`),
           tensor(`${prefix}.first.bias`),
         ),
       );
-      const residualValues = convolve(
+      const secondBlockValues = convolve(
         hiddenValues,
         architecture.boardSize,
-        architecture.trunkChannelCount,
-        architecture.trunkChannelCount,
+        isNestedBlock ? bottleneckChannelCount : architecture.trunkChannelCount,
+        isNestedBlock ? bottleneckChannelCount : architecture.trunkChannelCount,
         GO_MODEL_KERNEL_SIZE,
         GO_MODEL_KERNEL_RADIUS,
         tensor(`${prefix}.second.weight`),
         tensor(`${prefix}.second.bias`),
       );
+      const residualValues = isNestedBlock
+        ? convolve(
+            applyRelu(secondBlockValues),
+            architecture.boardSize,
+            bottleneckChannelCount,
+            architecture.trunkChannelCount,
+            GO_MODEL_POLICY_KERNEL_SIZE,
+            0,
+            tensor(`${prefix}.expand.weight`),
+            tensor(`${prefix}.expand.bias`),
+          )
+        : secondBlockValues;
       trunkValues = addAndApplyRelu(trunkValues, residualValues);
     }
 
