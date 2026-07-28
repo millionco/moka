@@ -3,10 +3,13 @@ import unittest
 import numpy as np
 
 from go_model.config import BOARD_AREA, KATAGO_SIMPLE_AREA_RULES
+from go_model.board import GameState
 from go_model.search_generate import (
     convert_parent_value_to_child,
     coordinate_to_move,
     create_analysis_query,
+    get_eligible_analysis_turns,
+    is_moka_turn,
     move_to_coordinate,
     select_analysis_turns,
 )
@@ -73,6 +76,41 @@ class SearchGenerationTests(unittest.TestCase):
         self.assertEqual(
             convert_parent_value_to_child(0.75),
             -0.75,
+        )
+
+    def test_moka_turn_alternates_with_game_color(self) -> None:
+        black_turn = GameState(next_color=1)
+        white_turn = GameState(next_color=-1)
+
+        self.assertTrue(is_moka_turn(0, black_turn))
+        self.assertFalse(is_moka_turn(0, white_turn))
+        self.assertFalse(is_moka_turn(1, black_turn))
+        self.assertTrue(is_moka_turn(1, white_turn))
+
+    def test_eligible_turns_can_select_only_moka_decisions(self) -> None:
+        game_state_history = [
+            GameState(next_color=1),
+            GameState(next_color=-1),
+            GameState(next_color=1),
+            GameState(next_color=-1),
+        ]
+
+        self.assertEqual(
+            get_eligible_analysis_turns(
+                game_state_history,
+                0,
+                False,
+                True,
+            ),
+            [0, 2],
+        )
+        self.assertIsNone(
+            get_eligible_analysis_turns(
+                game_state_history,
+                0,
+                False,
+                False,
+            )
         )
 
 

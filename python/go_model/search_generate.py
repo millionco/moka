@@ -7,7 +7,10 @@ from pathlib import Path
 import mlx.core as mx
 import numpy as np
 
-from go_model.arena import create_opening_game_state
+from go_model.arena import (
+    create_opening_game_state,
+    should_resign_selected_pass,
+)
 from go_model.board import GameState, get_legal_moves, is_game_over, play_move
 from go_model.collect import (
     evaluate_moka_batch,
@@ -32,14 +35,17 @@ from go_model.config import (
     SEARCH_TEACHER_DEFAULT_VISIT_COUNT,
     SEARCH_TEACHER_MAX_BATCH_SIZE,
     SEARCH_TEACHER_QUERY_BATCH_SIZE,
+    SEARCH_TEACHER_ROLLOUT_SIMULATION_COUNT,
     SEARCH_TEACHER_SELECTION_FRACTION,
     SEARCH_TEACHER_SHUTDOWN_TIMEOUT_SECONDS,
     SEARCH_TEACHER_THREADS_PER_ANALYSIS,
     SEARCH_TEACHER_UNIFORM_SELECTION_FRACTION,
     SEARCH_TEACHER_VALUE_DISAGREEMENT_WEIGHT,
+    SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
 )
 from go_model.features import encode_moka_features
 from go_model.model import MokaNestedNetwork
+from go_model.search import MokaEvaluator, MokaSearchSession
 from go_model.teacher import KataGoTeacher
 
 
@@ -165,6 +171,11 @@ def coordinate_to_move(coordinate: str) -> int:
     return row * BOARD_SIZE + column
 
 
+def is_moka_turn(game_id: int, game_state: GameState) -> bool:
+    is_moka_black = game_id % 2 == 0
+    return (game_state.next_color == 1) == is_moka_black
+
+
 def generate_rollout_games(
     checkpoint_path: Path,
     opponent_path: Path,
@@ -174,12 +185,18 @@ def generate_rollout_games(
     use_deterministic_rollouts: bool,
     opening_offset: int | None,
     use_action_regret: bool,
+    rollout_simulation_count: int,
 ) -> tuple[list[list[GameState]], list[list[int]], list[list[float]]]:
     random_generator = np.random.default_rng(random_seed)
     model = MokaNestedNetwork()
     model.load_weights(str(checkpoint_path))
     model.eval()
     opponent = KataGoTeacher(opponent_path)
+    evaluator = MokaEvaluator(model)
+    root_evaluator = MokaEvaluator(
+        model,
+        use_symmetry_ensemble=True,
+    )
     game_state_histories: list[list[GameState]] = [
         [] for _ in range(game_count)
     ]
@@ -193,6 +210,13 @@ def generate_rollout_games(
             else GameState()
         )
         for game_id in active_game_ids
+    ]
+    search_sessions = [
+        MokaSearchSession(
+            evaluator,
+            root_evaluator=root_evaluator,
+        )
+        for _ in active_game_ids
     ]
     for game_id, game_state in zip(active_game_ids, game_states, strict=True):
         game_moves[game_id] = game_state.move_history.copy()
@@ -230,24 +254,42 @@ def generate_rollout_games(
                 + SEARCH_TEACHER_VALUE_DISAGREEMENT_WEIGHT
                 * abs(opponent_value - moka_value)
             )
-            is_moka_black = game_id % 2 == 0
-            is_moka_turn = (game_state.next_color == 1) == is_moka_black
+            is_current_moka_turn = is_moka_turn(game_id, game_state)
             policy = (
                 moka_policy
-                if is_moka_turn
+                if is_current_moka_turn
                 else opponent_policy
             )
             move = (
-                select_greedy_rollout_move(game_state, policy)
-                if use_deterministic_rollouts
-                else sample_rollout_move(
+                search_sessions[game_index].select_move(
                     game_state,
-                    policy,
-                    random_generator,
+                    rollout_simulation_count,
+                )
+                if is_current_moka_turn and rollout_simulation_count > 0
+                else (
+                    select_greedy_rollout_move(game_state, policy)
+                    if use_deterministic_rollouts
+                    else sample_rollout_move(
+                        game_state,
+                        policy,
+                        random_generator,
+                    )
                 )
             )
             game_moves[game_id].append(move)
-            next_state = play_move(game_state, move)
+            did_resign = (
+                is_current_moka_turn
+                and should_resign_selected_pass(
+                    game_state,
+                    move,
+                    SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
+                )
+            )
+            next_state = (
+                None
+                if did_resign
+                else play_move(game_state, move)
+            )
 
             if next_state is not None and not is_game_over(next_state):
                 game_states[game_index] = next_state
@@ -263,11 +305,16 @@ def generate_rollout_games(
                 game_moves[next_game_id] = (
                     game_states[game_index].move_history.copy()
                 )
+                search_sessions[game_index] = MokaSearchSession(
+                    evaluator,
+                    root_evaluator=root_evaluator,
+                )
                 active_game_ids[game_index] = next_game_id
                 next_game_id += 1
             else:
                 del game_states[game_index]
                 del active_game_ids[game_index]
+                del search_sessions[game_index]
 
         if completed_game_count >= reported_completed_game_count + batch_size:
             print(f"generated {completed_game_count:,}/{game_count:,} games")
@@ -379,6 +426,35 @@ def select_analysis_turns(
     return sorted([int(turn) for turn in uniform_turns + surprising_turns])
 
 
+def get_eligible_analysis_turns(
+    game_state_history: list[GameState],
+    game_id: int,
+    use_middle_game_reanalysis: bool,
+    use_moka_turns_only: bool,
+) -> list[int] | None:
+    if not use_middle_game_reanalysis and not use_moka_turns_only:
+        return None
+
+    return [
+        turn_number
+        for turn_number, game_state in enumerate(game_state_history)
+        if (
+            (
+                not use_middle_game_reanalysis
+                or (
+                    OPENING_MOVE_COUNT
+                    <= game_state.move_count
+                    < MID_GAME_MOVE_COUNT
+                )
+            )
+            and (
+                not use_moka_turns_only
+                or is_moka_turn(game_id, game_state)
+            )
+        )
+    ]
+
+
 def create_analysis_query(
     game_id: int | str,
     moves: list[int],
@@ -428,6 +504,8 @@ def create_search_dataset(
     opening_offset: int | None,
     use_action_regret: bool,
     use_middle_game_reanalysis: bool,
+    rollout_simulation_count: int,
+    use_moka_turns_only: bool,
 ) -> dict[str, np.ndarray]:
     game_state_histories, game_moves, game_surprises = generate_rollout_games(
         checkpoint_path,
@@ -438,8 +516,18 @@ def create_search_dataset(
         use_deterministic_rollouts,
         opening_offset,
         use_action_regret,
+        rollout_simulation_count,
     )
     random_generator = np.random.default_rng(random_seed)
+    eligible_analysis_turns = [
+        get_eligible_analysis_turns(
+            game_state_histories[game_id],
+            game_id,
+            use_middle_game_reanalysis,
+            use_moka_turns_only,
+        )
+        for game_id in range(game_count)
+    ]
     analysis_turns = [
         (
             select_analysis_turns(
@@ -447,24 +535,14 @@ def create_search_dataset(
                 SEARCH_TEACHER_SELECTION_FRACTION,
                 SEARCH_TEACHER_UNIFORM_SELECTION_FRACTION,
                 random_generator,
-                (
-                    [
-                        turn_number
-                        for turn_number, game_state in enumerate(
-                            game_state_histories[game_id]
-                        )
-                        if (
-                            OPENING_MOVE_COUNT
-                            <= game_state.move_count
-                            < MID_GAME_MOVE_COUNT
-                        )
-                    ]
-                    if use_middle_game_reanalysis
-                    else None
-                ),
+                eligible_analysis_turns[game_id],
             )
             if use_selective_reanalysis
-            else list(range(len(game_state_histories[game_id])))
+            else (
+                eligible_analysis_turns[game_id]
+                if eligible_analysis_turns[game_id] is not None
+                else list(range(len(game_state_histories[game_id])))
+            )
         )
         for game_id in range(game_count)
     ]
@@ -759,6 +837,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--middle-game-reanalysis",
         action="store_true",
     )
+    argument_parser.add_argument("--moka-turns-only", action="store_true")
+    argument_parser.add_argument(
+        "--rollout-simulations",
+        type=int,
+        default=SEARCH_TEACHER_ROLLOUT_SIMULATION_COUNT,
+    )
     argument_parser.add_argument(
         "--games",
         type=int,
@@ -802,6 +886,8 @@ def main() -> None:
         ),
         arguments.regret_reanalysis,
         arguments.middle_game_reanalysis,
+        arguments.rollout_simulations,
+        arguments.moka_turns_only,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)

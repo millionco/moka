@@ -3121,3 +3121,71 @@ Descendant coefficient 0.75 was frozen as the unique five-win screen improvement
 The screen gain reversed on both independent blocks. The frozen candidate lost nine games in aggregate. Its 559.2-second runtime was lower than the control's 579.0 seconds because its games ended sooner, not because it changed the fixed inference budget.
 
 Separate root and descendant exploration is rejected, and the entire runtime path was removed. The accepted coefficient remains 2.0 at every node. The checkpoint, exact INT8 artifact, 64-visit budget, and Million website remain unchanged.
+
+## 2026-07-28 — Accepted-search b18 distillation
+
+### Method correction
+
+The native b18 search generator labeled positions from games attributed to Moka, but Moka's rollout moves came directly from its raw policy. The deployed player instead uses 64-visit tree search with an eight-symmetry root evaluation. The resulting training distribution did not represent the states reached by the accepted player.
+
+The generator now supports the accepted search player during rollouts and can restrict b18 analysis to Moka's own decision turns. The rollout sessions preserve subtrees independently for every concurrent game and apply the accepted pass-resignation rule. Raw-policy rollout remains the default so existing experiments stay reproducible.
+
+The corrected collection used:
+
+- 64 deterministic games at opening offset 2,481,000
+- 64 Moka simulations per move
+- alternating Moka colors
+- b18 analysis only on Moka decision turns
+- four b18 visits per analyzed position
+- 2,116 parent positions and 19,663 analyzed child states
+- 866,925 compressed bytes
+- SHA-256 `0657c38d2b74b35320d35e5d2e4cca48f847ecece7b9881a74bb33e73ed5653f`
+
+The average b18 policy support was 9.264 moves, mean top probability was 0.47637, mean entropy was 1.5128, and mean absolute value was 0.9078. The held-out split contained 216 positions. The accepted exact INT8 model scored 3.1451 loss, 35.6% top-move agreement, and 0.6016 value MAE on it.
+
+### Quantization-aware adaptation
+
+Three one-epoch candidates started from the accepted exact-dequantized checkpoint. Each used learning rate 0.000002, batch size 128, INT8 quantization-aware training, policy preservation weight 0.25, the corrected b18 corpus twice, and both accepted 64-visit search corpora once.
+
+| Seed | Validation loss | Validation move | Validation value MAE | Test loss | Test move | Test value MAE |
+| ---: | --------------: | --------------: | -------------------: | --------: | --------: | -------------: |
+|  119 |          2.7023 |           41.1% |               0.3910 |    3.1030 |     35.6% |         0.5504 |
+|  120 |          2.6995 |           41.1% |               0.3886 |    3.1004 |     36.6% |         0.5477 |
+|  121 |          2.6975 |           41.1% |               0.3862 |    3.0988 |     36.6% |         0.5453 |
+
+Every offline metric favored seed 121. All candidates exported to exactly 111,920 bytes. Their binary SHA-256 values were:
+
+- seed 119: `672691c38991bb02f9132d4f9f0bbe147167f02aa9a923054f5fff40be485ebc`
+- seed 120: `b9e625af3e1a143ccf42698f228c589a55a034a59f68303e9f266c2038f739ab`
+- seed 121: `22b51188fc0c3eb59dc0fc9d1df929069c312dcbcf40176b578708ebb2cfe526`
+
+On 20 exact-dequantized games at opening offset 2,490,000, the incumbent and seed 119 each won six games. Seeds 120 and 121 each won seven. Seed 121 advanced because it tied the arena lead and had the best offline metrics.
+
+| Opening offset | Incumbent wins | Seed 121 wins | Incumbent caps | Seed 121 caps |
+| -------------: | -------------: | ------------: | -------------: | ------------: |
+|      2,500,000 |             35 |            29 |              1 |             0 |
+|      2,510,000 |             42 |            43 |              0 |             0 |
+|      **Total** |         **77** |        **72** |          **1** |         **0** |
+
+The offline improvement did not improve completed wins. Seed 121 lost five games in aggregate and was rejected.
+
+### Conservative checkpoint blending
+
+Because the learned direction improved every held-out metric but moved behavior too far, exact INT8 candidates blended 25%, 50%, or 75% of seed 121 into the incumbent. On 20 new games at opening offset 2,520,000:
+
+| Candidate | Wins | Black | White | Caps |
+| --------- | ---: | ----: | ----: | ---: |
+| Incumbent |    6 |     2 |     4 |    0 |
+| 25% blend |    8 |     3 |     5 |    0 |
+| 50% blend |    7 |     4 |     3 |    0 |
+| 75% blend |    6 |     2 |     4 |    0 |
+
+The unique screen winner was frozen before confirmation.
+
+| Opening offset | Incumbent wins | 25% blend wins | Incumbent caps | 25% blend caps |
+| -------------: | -------------: | -------------: | -------------: | -------------: |
+|      2,530,000 |             38 |             39 |              0 |              0 |
+|      2,540,000 |             44 |             37 |              0 |              0 |
+|      **Total** |         **82** |         **76** |          **0** |          **0** |
+
+The blend improved by one game on the first block and regressed by seven on the second. It lost six games in aggregate and was rejected. The accepted checkpoint, exact 111,920-byte INT8 artifact, and runtime search remain unchanged. No Million website files were touched.
