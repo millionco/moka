@@ -3041,3 +3041,43 @@ Four standard deviations was frozen as the unique completed-win leader.
 The candidate regressed by three games on the first block and improved by two on the second, losing one game in aggregate. Control runtime was 584.6 seconds; LCB runtime was 607.1 seconds, about 3.8% slower. The screen gain did not reproduce, so the complete LCB runtime path and its second-moment storage were removed.
 
 Both experiments leave the accepted checkpoint, exact 111,920-byte INT8 artifact, and accepted search unchanged. No Million website files were touched.
+
+## 2026-07-28 — Per-channel INT8 scale optimization
+
+### Hypothesis
+
+The accepted float checkpoint was one game stronger than its ordinary INT8 export in their original 20-game sanity block. Choosing a lower clipping scale per output channel might reduce quantization error and recover strength without changing tensor shapes, parameter count, or the 111,920-byte artifact size.
+
+Fixed clipping fractions of 0.99, 0.97, 0.95, and 0.90 were compared with a per-channel MSE search over 61 fractions from 0.70 through 1.00. The MSE search clipped 27% of output channels, selected a mean fraction of 0.9986 and a minimum of 0.99, and reduced relative weight RMSE to 0.01942. On the two accepted-search test splits:
+
+| INT8 scales | Float top move | Logit RMSE | Value RMSE | First loss | Second loss |
+| ----------- | -------------: | ---------: | ---------: | ---------: | ----------: |
+| Ordinary    |          93.8% |    0.14243 |    0.03728 |     1.8519 |      2.0789 |
+| MSE grid    |          94.1% |    0.14326 |    0.01586 |     1.8566 |      2.0843 |
+| Clip 0.99   |          93.8% |    0.14594 |    0.03109 |     1.8611 |      2.0936 |
+| Clip 0.97   |          92.7% |    0.25015 |    0.05157 |     1.8528 |      2.0730 |
+
+More aggressive fixed clipping materially worsened float-policy fidelity and was excluded before arena screening.
+
+On 20 fresh exact-dequantized games from opening offset 2,420,000:
+
+| INT8 scales | Wins | Black | White | Caps |
+| ----------- | ---: | ----: | ----: | ---: |
+| Ordinary    |    9 |     5 |     4 |    0 |
+| MSE grid    |    8 |     5 |     3 |    0 |
+| Clip 0.97   |    9 |     5 |     4 |    0 |
+| Clip 0.99   |    7 |     3 |     4 |    0 |
+
+The candidate with the best reconstruction metrics lost one game. The best fixed candidate only tied the ordinary export. No scale rule advanced, so the exporter and accepted artifact remain unchanged.
+
+## 2026-07-28 — Reused-root symmetry value refresh
+
+### Hypothesis
+
+When a retained subtree becomes the real root, Moka refreshes its priors with the eight-way root evaluator but ignores the simultaneously computed eight-way value. Unvisited root children therefore use FPU based on the older single-orientation subtree mean. Blending the already available symmetry value into the reused root might improve allocation without another evaluation.
+
+The experimental path blended 0%, 25%, 50%, 75%, or 100% of the refreshed symmetry value into the reused root mean. It changed neither the model, artifact, inference count, visit budget, nor any descendant search setting.
+
+On 20 fresh games from opening offset 2,430,000, every blend scored exactly five wins: four as Black and one as White, with zero caps. Runtime ranged from 56.2 to 57.4 seconds. Pass counts changed slightly, proving the path was active, but no setting changed a game result.
+
+The complete value-refresh path was removed after the screen. Both experiments leave the accepted checkpoint, exact INT8 artifact, and accepted search unchanged. No Million website files were touched.
