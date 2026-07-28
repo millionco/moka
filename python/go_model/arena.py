@@ -26,6 +26,7 @@ from go_model.config import (
     SEARCH_AREA_VALUE_WEIGHT,
     SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
     SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
     SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY,
     SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
@@ -241,7 +242,7 @@ def run_arena(
     sequential_halving_candidate_count: int = (
         SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT
     ),
-    use_symmetry_ensemble: bool = False,
+    use_symmetry_ensemble: bool = SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
     symmetry_rotation_count: int = 0,
     should_flip_symmetry: bool = False,
     adaptive_max_simulation_count: int = (
@@ -679,7 +680,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
     )
-    argument_parser.add_argument("--symmetry-ensemble", action="store_true")
+    argument_parser.add_argument(
+        "--symmetry-ensemble",
+        action=argparse.BooleanOptionalAction,
+        default=SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
+    )
     argument_parser.add_argument("--symmetry-rotation", type=int, default=0)
     argument_parser.add_argument("--symmetry-flip", action="store_true")
     argument_parser.add_argument(

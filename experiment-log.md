@@ -4104,3 +4104,68 @@ On 100 untouched paired games from opening offset 3,620,000, the accepted model 
 The screen gain reversed by five games under confirmation. Dense visit-distribution matching softened decisive choices that the accepted tree needed. This branch is rejected without a second confirmation block. Future search distillation should protect ranked or high-visit actions explicitly rather than optimize dense cross-entropy alone.
 
 The accepted model, search, browser artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Ranked fresh-search continuation
+
+### Offline gate
+
+Dense fresh-search distillation lowered average loss but reduced held-out top-move agreement from 70.1% to approximately 67.7%. Four matched seed-270 candidates used the same fresh 4,216-position corpus, accepted initialization, one exact-QAT epoch, learning rate 0.000005, and policy preservation weight 0.25:
+
+| Objective              | Test loss | Test top move | Test value error |
+| :--------------------- | --------: | ------------: | ---------------: |
+| Accepted               |    1.9819 |         70.1% |           0.3515 |
+| 50% hard winner        |    1.9620 |         68.5% |           0.3371 |
+| Top-eight truncation   |    1.9613 |         68.1% |           0.3374 |
+| Top-four truncation    |    1.9617 |         68.5% |           0.3379 |
+| Top-eight listwise 0.1 |    1.9614 |         68.1% |           0.3373 |
+
+Every objective improved dense loss and value error but failed the predeclared requirement to preserve the accepted top-move agreement. None entered the arena. Rank protection changed the update direction but did not prevent decisive policy drift.
+
+## 2026-07-28 — Descendant symmetry consensus
+
+### Hypothesis
+
+The real-move root uses all eight aligned board symmetries, while every tree descendant previously used one canonical orientation. The promoted checkpoint reduced this mismatch through offline distillation but did not eliminate it. Test-time symmetry consensus can remove the residual orientation error without changing weights, model bytes, visits, or teacher access.
+
+On the 4,216-position fresh search corpus, each canonical-plus-one-view pair was compared with the accepted eight-view target:
+
+| Complementary view | Consensus KL | Top-move agreement | Value error |
+| :----------------- | -----------: | -----------------: | ----------: |
+| Reflection         |     0.036515 |              84.6% |    0.059383 |
+| 90°                |     0.034500 |              84.9% |    0.054325 |
+| 90° + reflection   |     0.039397 |              83.9% |    0.059570 |
+| 180°               |     0.033167 |              85.5% |    0.058033 |
+| 180° + reflection  |     0.039939 |              84.5% |    0.065120 |
+| 270°               |     0.034317 |              85.4% |    0.057719 |
+| 270° + reflection  |     0.039985 |              84.6% |    0.066486 |
+
+The 180°, 90°, and 270° pairs advanced as the best policy, value, and close-policy controls. On 20 fresh games from opening offset 3,630,000, canonical descendants won nine, while the pairs won 10, seven, and 11. All had zero caps. The 270° pair was frozen as the unique screen leader.
+
+Two untouched 100-game paired blocks produced:
+
+| Opening offset | Canonical wins | Pair wins | Canonical caps | Pair caps |
+| -------------: | -------------: | --------: | -------------: | --------: |
+|      3,640,000 |             40 |        47 |              0 |         0 |
+|      3,650,000 |             40 |        35 |              0 |         0 |
+|      **Total** |         **80** |    **82** |          **0** |     **0** |
+
+The pair's first-block gain reversed in the second block. A two-game aggregate edge with opposite block outcomes is insufficient, so the pair is rejected.
+
+### Full consensus
+
+The exact eight-view descendant ensemble won nine of 20 screen games from opening offset 3,660,000 versus seven for canonical descendants. Both had zero caps and took 55.2 and 54.4 seconds.
+
+Three untouched paired 100-game blocks produced:
+
+| Opening offset | Canonical wins | Full-consensus wins | Canonical Black / White | Consensus Black / White | Canonical / consensus caps |
+| -------------: | -------------: | ------------------: | :---------------------- | :---------------------- | -------------------------: |
+|      3,670,000 |             39 |                  47 | 19 / 20                 | 26 / 21                 |                      0 / 0 |
+|      3,680,000 |             42 |                  44 | 23 / 19                 | 20 / 24                 |                      0 / 1 |
+|      3,700,000 |             37 |                  43 | 14 / 23                 | 26 / 17                 |                      1 / 1 |
+|      **Total** |        **118** |             **134** | **56 / 62**             | **72 / 62**             |                  **1 / 2** |
+
+Full consensus improved every block by eight, two, and six games, adding 16 wins in aggregate. Runtime was 852.1 seconds versus 791.6 for canonical descendants, a 7.6% increase enabled by batched symmetry inference.
+
+The repository intentionally uses simple ko to match the b6c96 teacher configuration. The three-block audit contained one canonical and two consensus repetition caps. Canonical Moka received one area-adjudicated cap win; both consensus caps were Moka losses. The strength gain therefore did not come from cap adjudication or teacher information.
+
+Full descendant symmetry consensus is accepted as the default research search player. `--no-symmetry-ensemble` provides the canonical control. The default propagates through arena play and future search-data collection. The 64-visit budget, 104,129 parameters, 111,920-byte browser artifact, and model digest remain unchanged. The Million website remains unchanged.

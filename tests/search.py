@@ -70,11 +70,20 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(arguments.search_exploration, 2.0)
         self.assertEqual(arguments.search_fpu_reduction, 0.25)
         self.assertEqual(arguments.resignation_area_margin, 60.0)
+        self.assertTrue(arguments.symmetry_ensemble)
         self.assertTrue(arguments.root_symmetry_ensemble)
         self.assertEqual(
             arguments.root_symmetry_geometric_policy_weight,
             0.125,
         )
+        control_arguments = create_argument_parser().parse_args(
+            [
+                "--checkpoint",
+                "checkpoint.safetensors",
+                "--no-symmetry-ensemble",
+            ],
+        )
+        self.assertFalse(control_arguments.symmetry_ensemble)
 
     def test_resignation_requires_hopeless_selected_pass(
         self,

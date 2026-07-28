@@ -24,6 +24,7 @@ from go_model.config import (
     SEARCH_AREA_VALUE_START_MOVE_COUNT,
     SEARCH_AREA_VALUE_RAMP_MOVE_COUNT,
     SEARCH_AREA_VALUE_WEIGHT,
+    SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
     SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY,
     SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
@@ -78,7 +79,7 @@ class MokaEvaluator:
     def __init__(
         self,
         model: MokaNetwork,
-        use_symmetry_ensemble: bool = False,
+        use_symmetry_ensemble: bool = SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
         symmetry_rotation_count: int = 0,
         should_flip_symmetry: bool = False,
         use_symmetry_pair: bool = False,
