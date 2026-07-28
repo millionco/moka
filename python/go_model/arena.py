@@ -37,6 +37,7 @@ from go_model.config import (
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
+    SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT,
@@ -222,6 +223,9 @@ def run_arena(
     ),
     root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
     root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
+    root_policy_temperature_end_move_count: int = (
+        SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT
+    ),
     late_simulation_count: int = SEARCH_LATE_SIMULATION_COUNT,
     late_simulation_start_move_count: int = (
         SEARCH_LATE_SIMULATION_START_MOVE_COUNT
@@ -354,6 +358,9 @@ def run_arena(
                     ),
                     root_branch_count=root_branch_count,
                     root_policy_temperature=root_policy_temperature,
+                    root_policy_temperature_end_move_count=(
+                        root_policy_temperature_end_move_count
+                    ),
                     q_value_normalization_weight=(
                         q_value_normalization_weight
                     ),
@@ -394,6 +401,9 @@ def run_arena(
                     ),
                     root_branch_count=root_branch_count,
                     root_policy_temperature=root_policy_temperature,
+                    root_policy_temperature_end_move_count=(
+                        root_policy_temperature_end_move_count
+                    ),
                     q_value_normalization_weight=(
                         q_value_normalization_weight
                     ),
@@ -625,6 +635,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_ROOT_POLICY_TEMPERATURE,
     )
     argument_parser.add_argument(
+        "--root-policy-temperature-end-move",
+        type=int,
+        default=SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT,
+    )
+    argument_parser.add_argument(
         "--descendant-symmetry-pair",
         action="store_true",
     )
@@ -694,6 +709,7 @@ def main() -> None:
         arguments.search_fpu_root_only,
         arguments.root_branches,
         arguments.root_policy_temperature,
+        arguments.root_policy_temperature_end_move,
         arguments.late_simulations,
         arguments.late_simulation_start_move,
         arguments.search_q_normalization_weight,

@@ -2324,3 +2324,95 @@ Two disjoint 100-game blocks compared the frozen candidate with production:
 |      **Total** |      **71** |    **16** |      **79** |    **16** |
 
 Every win completed normally. Weight 1.25 added eight completed wins without increasing caps, model evaluations, model bytes, or browser payload. It is accepted for the browser.
+
+## 2026-07-28 — Post-value-weight first-play urgency
+
+First-play urgency was retuned because increasing the PUCT value weight changes the penalty's effective influence on unvisited moves. The accepted checkpoint, 56-visit budget, one-leaf topology, root symmetry, 0.25 geometric policy blend, exploration 2.0, value weight 1.25, full branching, and maximum-visit move selection were held fixed.
+
+On 20 fresh games from opening offset 1,730,000:
+
+| FPU reduction | Wins | Caps |
+| ------------: | ---: | ---: |
+| Absolute zero |    5 |    1 |
+|          0.00 |    7 |    0 |
+|          0.10 |    7 |    0 |
+|          0.25 |    7 |    0 |
+|          0.40 |    5 |    1 |
+|          0.50 |    7 |    1 |
+
+Every win completed normally. Reductions 0, 0.10, and the accepted 0.25 tied exactly on wins and caps. No setting improved the joint result, so no candidate advanced to confirmation and production retains 0.25.
+
+## 2026-07-28 — Post-value-weight exploration
+
+Exploration was retuned on a new opening block after the FPU screen retained 0.25. The accepted value weight 1.25 and every other deployed search setting were held fixed.
+
+On 20 fresh games from opening offset 1,740,000:
+
+| Exploration | Wins | Caps |
+| ----------: | ---: | ---: |
+|        1.25 |    3 |    1 |
+|        1.50 |    6 |    1 |
+|        1.75 |    5 |    2 |
+|        2.00 |    8 |    2 |
+|        2.25 |    5 |    1 |
+|        2.50 |    5 |    1 |
+
+Every win completed normally. The deployed 2.0 coefficient remained the unique win leader. No alternative advanced to confirmation.
+
+## 2026-07-28 — Post-value-weight root-policy temperature
+
+The symmetry-aggregated root prior was sharpened or flattened before allocating the accepted 56 visits. The checkpoint, geometric consensus, value weight 1.25, exploration 2.0, FPU 0.25, full branching, and maximum-visit selection were held fixed.
+
+On 20 fresh games from opening offset 1,750,000:
+
+| Temperature | Wins | Caps |
+| ----------: | ---: | ---: |
+|        0.50 |    8 |    0 |
+|        0.75 |   10 |    1 |
+|        1.00 |    7 |    3 |
+|        1.25 |    8 |    1 |
+|        1.50 |    6 |    0 |
+
+Temperature 0.75 was frozen as the screen winner without testing an intermediate value.
+
+On 100 untouched games from opening offset 1,760,000, production scored 38 wins with two caps. The frozen candidate reported 47 wins with five caps, including one cap-awarded win, so it completed 46 wins normally.
+
+Sharpening added eight normally completed wins but more than doubled unfinished games. It failed the predeclared no-cap-regression gate after the first confirmation block and was rejected. Production retains temperature 1.0.
+
+## 2026-07-28 — Post-value-weight geometric consensus
+
+The geometric root-policy blend was retuned because its accepted 0.25 value predated the higher PUCT value weight. The accepted checkpoint, 56 visits, one-leaf topology, root symmetry, exploration 2.0, value weight 1.25, FPU 0.25, full branching, and maximum-visit selection were held fixed.
+
+On 20 fresh games from opening offset 1,770,000:
+
+| Geometric blend | Wins | Caps |
+| --------------: | ---: | ---: |
+|            0.00 |   14 |    1 |
+|            0.10 |   14 |    1 |
+|            0.25 |   11 |    1 |
+|            0.40 |   11 |    1 |
+|            0.50 |   10 |    1 |
+|            0.75 |   10 |    2 |
+
+Weights 0 and 0.10 tied on the joint outcome. Weight 0.10 was frozen because it was the smaller change from production.
+
+On 100 untouched games from opening offset 1,780,000, production 0.25 scored 33 completed wins with six caps. Candidate 0.10 scored 35 completed wins with seven caps. Neither side received a cap-awarded win.
+
+The candidate added two completed wins but also added an unfinished game. It failed the no-cap-regression gate after the first confirmation block and was rejected. Production retains the 0.25 geometric blend.
+
+## 2026-07-28 — Phase-limited root-policy sharpening
+
+Full-game temperature 0.75 added completed wins and caps. A deterministic research schedule therefore sharpened the root prior only before a move-count cutoff, then returned to temperature 1.0. The option is disabled by default and regression-tested at the cutoff boundary.
+
+On 20 fresh games from opening offset 1,790,000:
+
+| Temperature schedule | Wins | Caps |
+| -------------------: | ---: | ---: |
+|            Fixed 1.0 |    8 |    1 |
+|           Fixed 0.75 |    6 |    0 |
+|      0.75 to move 40 |    5 |    1 |
+|      0.75 to move 56 |    6 |    0 |
+|      0.75 to move 72 |    6 |    0 |
+|      0.75 to move 88 |    6 |    0 |
+
+Every win completed normally. Every sharpened configuration lost at least two completed games. The cap reduction therefore did not represent a strength improvement, and no schedule advanced to confirmation. Production retains fixed temperature 1.0.

@@ -36,6 +36,7 @@ from go_model.config import (
     SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
+    SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT,
@@ -643,6 +644,21 @@ def resolve_q_value_normalization_weight(
     )
 
 
+def resolve_root_policy_temperature(
+    root_policy_temperature: float,
+    root_policy_temperature_end_move_count: int,
+    move_count: int,
+) -> float:
+    return (
+        root_policy_temperature
+        if (
+            root_policy_temperature_end_move_count <= 0
+            or move_count < root_policy_temperature_end_move_count
+        )
+        else 1.0
+    )
+
+
 def run_simulation(
     node: SearchNode,
     evaluator: MokaEvaluator,
@@ -1025,6 +1041,9 @@ class MokaSearchSession:
         ),
         root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
         root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
+        root_policy_temperature_end_move_count: int = (
+            SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT
+        ),
         q_value_normalization_weight: float = (
             SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
         ),
@@ -1055,6 +1074,9 @@ class MokaSearchSession:
         )
         self.root_branch_count = root_branch_count
         self.root_policy_temperature = root_policy_temperature
+        self.root_policy_temperature_end_move_count = (
+            root_policy_temperature_end_move_count
+        )
         self.q_value_normalization_weight = q_value_normalization_weight
         self.use_q_value_normalization_at_root_only = (
             use_q_value_normalization_at_root_only
@@ -1085,7 +1107,11 @@ class MokaSearchSession:
         policy, network_value = self.root_evaluator.evaluate(game_state)
         policy = apply_search_policy_temperature(
             policy,
-            self.root_policy_temperature,
+            resolve_root_policy_temperature(
+                self.root_policy_temperature,
+                self.root_policy_temperature_end_move_count,
+                game_state.move_count,
+            ),
         )
 
         if root.children:
@@ -1288,6 +1314,9 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
         ),
         root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
         root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
+        root_policy_temperature_end_move_count: int = (
+            SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT
+        ),
         q_value_normalization_weight: float = (
             SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
         ),
@@ -1317,6 +1346,9 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
             ),
             root_branch_count=root_branch_count,
             root_policy_temperature=root_policy_temperature,
+            root_policy_temperature_end_move_count=(
+                root_policy_temperature_end_move_count
+            ),
             q_value_normalization_weight=q_value_normalization_weight,
             use_q_value_normalization_at_root_only=(
                 use_q_value_normalization_at_root_only

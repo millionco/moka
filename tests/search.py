@@ -12,6 +12,7 @@ from go_model.search import (
     prune_root_children,
     resolve_first_play_urgency_reduction,
     resolve_q_value_normalization_weight,
+    resolve_root_policy_temperature,
     run_search_simulations,
     select_child,
 )
@@ -258,6 +259,20 @@ class SearchTest(unittest.TestCase):
 
         self.assertGreater(root.children[0].prior, 0.9)
         self.assertLess(root.children[1].prior, 0.1)
+
+    def test_root_policy_temperature_returns_to_one_after_cutoff(self) -> None:
+        self.assertEqual(
+            resolve_root_policy_temperature(0.75, 60, 59),
+            0.75,
+        )
+        self.assertEqual(
+            resolve_root_policy_temperature(0.75, 60, 60),
+            1.0,
+        )
+        self.assertEqual(
+            resolve_root_policy_temperature(0.75, 0, 80),
+            0.75,
+        )
 
     def test_search_targets_report_root_perspective_q_values(self) -> None:
         class PositiveEvaluator(UniformEvaluator):
