@@ -2988,3 +2988,56 @@ On 20 fresh exact-INT8 games from opening offset 2,370,000:
 | INT8-anchored 25% b18 |   11 |    0 |     5 |     6 |
 
 The ordinary stronger-teacher root lost two games. The conservative root reproduced the control rather than improving it. Neither advanced, and the alternate-root runtime path was removed. The accepted player, checkpoint, and INT8 artifact are unchanged. No website files were touched.
+
+## 2026-07-28 — Selective high-visit b18 reanalysis
+
+### Hypothesis
+
+The earlier stronger-teacher corpus spent 32 native b18 visits on every reached position. KataGo's training loop instead concentrates full search on a subset of positions. Spending approximately the same teacher budget on fewer, harder positions might produce more useful targets without increasing offline teacher compute.
+
+Sixty-four deterministic accepted-Moka-versus-b6 games from opening offset 2,380,000 supplied the trajectories. One quarter of each game's turns were selected: half uniformly and half by b6 policy KL plus 0.25 times value disagreement. Native b18 then analyzed only those turns at 128 visits.
+
+The corpus contained 1,063 positions and had SHA-256 `8ff4f6bb08ada9168d541bbacfcb182fb3e37bcf241de3a847c0c0ea322e0bb8`. Its nominal teacher budget was 136,064 visits, compared with 135,168 visits for the earlier 4,224-position, 32-visit corpus. Policies averaged 11.88 supported moves, 0.460 top-move probability, and 1.632 nats of entropy. The earlier labels averaged 7.61 supported moves, 0.484 top-move probability, and 1.435 nats.
+
+Seeds 116, 117, and 118 started from the exact dequantized accepted INT8 artifact. They used one quantization-aware epoch at learning rate 0.000002, policy-preservation weight 0.25, fourfold selective-corpus replay, and both accepted 64-visit search corpora as preservation replay.
+
+On the untouched selective-corpus test split:
+
+| Artifact  |   Loss | Top move | Value MAE |
+| --------- | -----: | -------: | --------: |
+| Incumbent | 3.1464 |    25.0% |    0.4131 |
+| Seed 116  | 3.1764 |    25.0% |    0.4439 |
+| Seed 117  | 3.1726 |    25.0% |    0.4414 |
+| Seed 118  | 3.1726 |    25.0% |    0.4413 |
+
+Every exact INT8 candidate worsened both its primary loss and value error. The branch failed before arena screening and was rejected. Concentrating the same teacher budget produced richer labels but not a trainable improvement under the current compact architecture and deployment-aware objective.
+
+## 2026-07-28 — KataGo-style root lower confidence bound
+
+### Hypothesis
+
+[KataGo's play selection](https://github.com/lightvector/KataGo/blob/master/cpp/search/searchresults.cpp) can favor a sufficiently visited move whose estimated utility has the best lower confidence bound. Moka ordinarily plays the most-visited root child. Tracking the second moment of backed-up values and applying KataGo's bounded virtual-visit bonus might make better use of the same 64 evaluations.
+
+The experimental path tracked each node's value-square sum. Root moves with at least 15% of the leading visit count received a variance-prior lower confidence bound. The best bound received KataGo's bounded selection-weight bonus. The model, exact INT8 artifact, 64-visit budget, root symmetry, exploration, FPU, value weight, branching, and resignation rule were fixed.
+
+On 20 fresh games from opening offset 2,390,000:
+
+| LCB standard deviations | Wins | Black | White | Caps |
+| ----------------------: | ---: | ----: | ----: | ---: |
+|                     0.0 |    7 |     4 |     3 |    0 |
+|                     0.5 |    7 |     5 |     2 |    0 |
+|                     1.0 |    7 |     4 |     3 |    0 |
+|                     2.0 |    9 |     7 |     2 |    0 |
+|                     4.0 |   11 |     6 |     5 |    0 |
+
+Four standard deviations was frozen as the unique completed-win leader.
+
+| Opening offset | Control wins | LCB wins | Control caps | LCB caps |
+| -------------: | -----------: | -------: | -----------: | -------: |
+|      2,400,000 |           42 |       39 |            0 |        0 |
+|      2,410,000 |           41 |       43 |            0 |        0 |
+|      **Total** |       **83** |   **82** |        **0** |    **0** |
+
+The candidate regressed by three games on the first block and improved by two on the second, losing one game in aggregate. Control runtime was 584.6 seconds; LCB runtime was 607.1 seconds, about 3.8% slower. The screen gain did not reproduce, so the complete LCB runtime path and its second-moment storage were removed.
+
+Both experiments leave the accepted checkpoint, exact 111,920-byte INT8 artifact, and accepted search unchanged. No Million website files were touched.
