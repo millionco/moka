@@ -2849,3 +2849,62 @@ A deployment-aware salvage anchored 25%, 50%, and 75% stronger-teacher blends to
 The deployment-aware blend improved one block and regressed the other, losing one game in aggregate. It is rejected.
 
 The stronger teacher contains useful float signal, but neither ordinary nor deployment-aware INT8 export cleared the exact-artifact gate. The accepted Moka checkpoint and artifact remain unchanged. No website files were touched.
+
+## 2026-07-28 — Exact-INT8 quantization-aware continuation
+
+### Hypothesis
+
+The stronger b18 teacher improved a float interpolation from 90 to 97 wins, but ordinary INT8 export reduced it to 76 wins against the exact incumbent's 92. Training through the same per-output-channel INT8 rounding used by export might preserve useful teacher signal in the deployable artifact.
+
+An opt-in quantization-aware path now keeps float shadow weights for optimization while every training, validation, and test forward pass uses straight-through symmetric INT8 weights. Biases remain float32, matching export. Regression tests verify the quantization values and identity gradient. Direct comparison of an exported candidate with its dequantized evaluation checkpoint found zero parameter error.
+
+Ordinary training is unchanged.
+
+### Stronger-teacher QAT
+
+Seeds 104, 105, and 106 started from the exact dequantized accepted artifact. They used one epoch at learning rate 0.000002, policy-preservation weight 0.25, fourfold stronger-teacher replay, the accepted-search corpus, and the 20,000-position browser replay set.
+
+Their b18 test losses were 2.5600, 2.5590, and 2.5603, compared with 2.5750 for the accepted INT8 artifact. Value MAE improved from 0.3197 to 0.3121, 0.3114, and 0.3125.
+
+On 20 fresh exact-INT8 games from opening offset 2,290,000:
+
+| Artifact  | Wins | Caps | Resignations |
+| --------- | ---: | ---: | -----------: |
+| Incumbent |    9 |    0 |            1 |
+| Seed 104  |    7 |    0 |            1 |
+| Seed 105  |    8 |    0 |            0 |
+| Seed 106  |    7 |    0 |            2 |
+
+The teacher-heavy branch was rejected.
+
+### Lower teacher mixture
+
+Seeds 107, 108, and 109 removed the three extra copies of the b18 corpus while retaining accepted-search and browser replay. Their b18 test losses were 2.5658, 2.5662, and 2.5661.
+
+On 20 fresh exact-INT8 games from opening offset 2,300,000:
+
+| Artifact  | Wins | Caps | Black | White |
+| --------- | ---: | ---: | ----: | ----: |
+| Incumbent |    9 |    0 |     6 |     3 |
+| Seed 107  |    9 |    0 |     5 |     4 |
+| Seed 108  |    8 |    0 |     5 |     3 |
+| Seed 109  |    7 |    0 |     5 |     2 |
+
+The best lower-mixture seed tied rather than improved, so none advanced.
+
+### Search-target QAT
+
+Seeds 110, 111, and 112 replaced the b18 primary corpus with the fresh second-round 64-visit search corpus. The first-round search corpus and browser corpus supplied preservation replay. One epoch used learning rate 0.000005 and policy-preservation weight 0.25.
+
+Their second-round test losses were 2.0352, 2.0335, and 2.0338, with top-move agreements of 71.2%, 71.0%, and 70.6%.
+
+On 20 fresh exact-INT8 games from opening offset 2,310,000:
+
+| Artifact  | Wins | Caps | Resignations |
+| --------- | ---: | ---: | -----------: |
+| Incumbent |    8 |    0 |            1 |
+| Seed 110  |    4 |    0 |            0 |
+| Seed 111  |    7 |    0 |            0 |
+| Seed 112  |    7 |    0 |            0 |
+
+All candidates remained 111,920 bytes. Quantization-aware optimization fixed the float-to-INT8 mismatch as intended, but lower teacher loss and higher search-target agreement still failed to predict game strength. Every candidate is rejected. The accepted checkpoint and artifact remain unchanged, and no website files were touched.

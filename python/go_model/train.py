@@ -42,6 +42,7 @@ from go_model.model import (
     MokaSoftPolicyNetwork,
     create_moka_network,
 )
+from go_model.quantization import fake_quantize_int8_parameters
 from go_model.symmetry import apply_batch_board_symmetry, apply_batch_spatial_symmetry
 
 
@@ -343,6 +344,7 @@ def train(
     freeze_policy_convolution: bool,
     policy_preservation_weight: float,
     train_global_adapter_only: bool,
+    use_int8_quantization_aware_training: bool,
 ) -> None:
     dataset = np.load(dataset_path)
     features = dataset["features"].astype(np.float32)
@@ -653,9 +655,44 @@ def train(
         raise ValueError(
             "Policy-convolution freezing requires trunk freezing."
         )
+    if use_int8_quantization_aware_training and (
+        freeze_trunk
+        or train_global_adapter_only
+        or soft_policy_loss_weight > 0
+        or use_auxiliary_network
+        or use_q_auxiliary
+        or use_attention_auxiliary
+    ):
+        raise ValueError(
+            "INT8 quantization-aware training requires a fully trainable "
+            "deployment network."
+        )
 
     optimizer = optim.AdamW(learning_rate=learning_rate)
-    loss_and_grad = nn.value_and_grad(model, calculate_loss)
+    quantized_model = (
+        create_moka_network(
+            use_nested_network,
+            use_spatial_network,
+            use_recurrent_network,
+            use_context_network,
+            use_wide_network,
+            use_global_pool_network,
+        )
+        if use_int8_quantization_aware_training
+        else None
+    )
+
+    if quantized_model is not None:
+        def calculate_quantized_loss(
+            parameters: dict,
+            *loss_arguments: object,
+        ) -> tuple:
+            quantized_model.update(fake_quantize_int8_parameters(parameters))
+            return calculate_loss(quantized_model, *loss_arguments)
+
+        loss_and_grad = mx.value_and_grad(calculate_quantized_loss)
+    else:
+        loss_and_grad = nn.value_and_grad(model, calculate_loss)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     best_validation_loss = float("inf")
     best_move_agreement = 0.0
@@ -772,8 +809,7 @@ def train(
                 else mx.zeros_like(policy_batch)
             )
             mx.eval(reference_policy_logits)
-            (loss, _), gradients = loss_and_grad(
-                model,
+            loss_arguments = (
                 feature_batch,
                 policy_batch,
                 value_batch,
@@ -796,12 +832,32 @@ def train(
                 reference_policy_logits,
                 policy_preservation_weight,
             )
+            (loss, _), gradients = (
+                loss_and_grad(
+                    model.trainable_parameters(),
+                    *loss_arguments,
+                )
+                if quantized_model is not None
+                else loss_and_grad(model, *loss_arguments)
+            )
             optimizer.update(model, gradients)
-            mx.eval(model.parameters(), optimizer.state, loss)
+            if quantized_model is not None:
+                quantized_model.update(
+                    fake_quantize_int8_parameters(model.parameters())
+                )
+                mx.eval(
+                    model.parameters(),
+                    quantized_model.parameters(),
+                    optimizer.state,
+                    loss,
+                )
+            else:
+                mx.eval(model.parameters(), optimizer.state, loss)
             training_losses.append(float(loss.item()))
 
+        evaluation_model = quantized_model if quantized_model is not None else model
         validation_loss, move_agreement, value_error = evaluate(
-            model,
+            evaluation_model,
             features[validation_indexes],
             policies[validation_indexes],
             values[validation_indexes],
@@ -827,8 +883,10 @@ def train(
             model.save_weights(str(checkpoint_path))
 
     model.load_weights(str(checkpoint_path))
+    if quantized_model is not None:
+        quantized_model.update(fake_quantize_int8_parameters(model.parameters()))
     test_loss, test_move_agreement, test_value_error = evaluate(
-        model,
+        quantized_model if quantized_model is not None else model,
         features[test_indexes],
         policies[test_indexes],
         values[test_indexes],
@@ -907,6 +965,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--global-adapter-only",
         action="store_true",
     )
+    argument_parser.add_argument(
+        "--int8-quantization-aware",
+        action="store_true",
+    )
     argument_parser.add_argument("--auxiliary-checkpoint", type=Path)
     argument_parser.add_argument("--listwise-weight", type=float, default=0)
     argument_parser.add_argument(
@@ -966,6 +1028,7 @@ def main() -> None:
         arguments.freeze_policy_convolution,
         arguments.policy_preservation_weight,
         arguments.global_adapter_only,
+        arguments.int8_quantization_aware,
     )
 
 
