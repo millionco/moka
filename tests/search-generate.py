@@ -8,6 +8,7 @@ from go_model.search_generate import (
     convert_parent_value_to_child,
     coordinate_to_move,
     create_analysis_query,
+    extract_analysis_targets,
     extract_auxiliary_targets,
     get_eligible_analysis_turns,
     is_moka_turn,
@@ -73,6 +74,37 @@ class SearchGenerationTests(unittest.TestCase):
             ownership.reshape(9, 9),
         )
         self.assertEqual(extracted_score, 12.5)
+
+    def test_analysis_targets_normalize_visits_and_child_values(self) -> None:
+        targets = extract_analysis_targets(
+            {
+                "moveInfos": [
+                    {
+                        "move": "A9",
+                        "winrate": 0.8,
+                        "edgeVisits": 2,
+                    },
+                    {
+                        "move": "B9",
+                        "winrate": 0.4,
+                        "edgeVisits": 1,
+                    },
+                ],
+                "rootInfo": {"winrate": 0.75},
+            },
+            GameState(),
+            False,
+        )
+
+        self.assertIsNotNone(targets)
+        if targets is None:
+            return
+        self.assertAlmostEqual(float(targets.policy[0]), 2 / 3)
+        self.assertAlmostEqual(float(targets.policy[1]), 1 / 3)
+        self.assertAlmostEqual(float(targets.value), 0.5)
+        self.assertEqual(len(targets.child_features), 2)
+        self.assertAlmostEqual(targets.child_values[0], -0.6)
+        self.assertAlmostEqual(targets.child_values[1], 0.2)
 
     def test_selective_reanalysis_mixes_uniform_and_surprising_turns(self) -> None:
         selected_turns = select_analysis_turns(

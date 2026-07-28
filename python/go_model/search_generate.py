@@ -2,6 +2,7 @@ import argparse
 import json
 import subprocess
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 import mlx.core as mx
@@ -47,6 +48,19 @@ from go_model.features import encode_moka_features
 from go_model.model import MokaNestedNetwork
 from go_model.search import MokaEvaluator, MokaSearchSession
 from go_model.teacher import KataGoTeacher
+
+
+@dataclass
+class AnalysisTargets:
+    policy: np.ndarray
+    q_values: np.ndarray
+    q_weights: np.ndarray
+    value: float
+    child_features: list[np.ndarray]
+    child_values: list[float]
+    child_weights: list[float]
+    ownership: np.ndarray | None
+    score: float | None
 
 
 class KataGoAnalysisEngine:
@@ -502,6 +516,54 @@ def extract_auxiliary_targets(
     )
 
 
+def extract_analysis_targets(
+    response: dict,
+    game_state: GameState,
+    include_auxiliary_targets: bool,
+) -> AnalysisTargets | None:
+    policy = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
+    q_values = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
+    q_weights = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
+    child_features: list[np.ndarray] = []
+    child_values: list[float] = []
+    child_weights: list[float] = []
+
+    for move_information in response["moveInfos"]:
+        move = coordinate_to_move(move_information["move"])
+        parent_value = 2 * float(move_information["winrate"]) - 1
+        edge_visit_count = float(move_information["edgeVisits"])
+        policy[move] = edge_visit_count
+        q_values[move] = parent_value
+        q_weights[move] = edge_visit_count
+        child_state = play_move(game_state, move)
+
+        if child_state is not None:
+            child_features.append(encode_moka_features(child_state))
+            child_values.append(convert_parent_value_to_child(parent_value))
+            child_weights.append(edge_visit_count)
+
+    policy_sum = float(np.sum(policy))
+    if policy_sum == 0:
+        return None
+    policy /= policy_sum
+    ownership, score = (
+        extract_auxiliary_targets(response)
+        if include_auxiliary_targets
+        else (None, None)
+    )
+    return AnalysisTargets(
+        policy=policy,
+        q_values=q_values,
+        q_weights=q_weights,
+        value=2 * float(response["rootInfo"]["winrate"]) - 1,
+        child_features=child_features,
+        child_values=child_values,
+        child_weights=child_weights,
+        ownership=ownership,
+        score=score,
+    )
+
+
 def convert_parent_value_to_child(value: float) -> float:
     return -value
 
@@ -525,7 +587,13 @@ def create_search_dataset(
     rollout_simulation_count: int,
     use_moka_turns_only: bool,
     include_auxiliary_targets: bool,
+    use_teacher_branches: bool,
 ) -> dict[str, np.ndarray]:
+    if use_counterfactual_reanalysis and use_teacher_branches:
+        raise ValueError(
+            "Teacher branches cannot be combined with counterfactual reanalysis."
+        )
+
     game_state_histories, game_moves, game_surprises = generate_rollout_games(
         checkpoint_path,
         opponent_path,
@@ -596,6 +664,10 @@ def create_search_dataset(
     rollout_moves: list[int] = []
     ownerships: list[np.ndarray] = []
     scores: list[float] = []
+    branch_parent_indexes: list[int] = []
+    branch_queries: list[dict] = []
+    branch_states: dict[int, GameState] = {}
+    branch_game_ids: dict[int, int] = {}
 
     try:
         for query_batch_start in range(
@@ -634,67 +706,114 @@ def create_search_dataset(
                     int(response["turnNumber"])
                     - prefix_lengths[game_id]
                 )
-                policy = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
-                move_q_values = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
-                move_q_weights = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
                 game_state = game_state_histories[game_id][turn_number]
-                response_child_features: list[np.ndarray] = []
-                response_child_values: list[float] = []
-                response_child_weights: list[float] = []
-
-                for move_information in response["moveInfos"]:
-                    move = coordinate_to_move(move_information["move"])
-                    parent_value = (
-                        2 * float(move_information["winrate"]) - 1
-                    )
-                    edge_visit_count = float(move_information["edgeVisits"])
-                    policy[move] = move_information["edgeVisits"]
-                    move_q_values[move] = parent_value
-                    move_q_weights[move] = edge_visit_count
-                    child_state = play_move(game_state, move)
-
-                    if child_state is not None:
-                        response_child_features.append(
-                            encode_moka_features(child_state)
-                        )
-                        response_child_values.append(
-                            convert_parent_value_to_child(parent_value)
-                        )
-                        response_child_weights.append(edge_visit_count)
-
-                policy_sum = float(np.sum(policy))
-
-                if policy_sum == 0:
+                targets = extract_analysis_targets(
+                    response,
+                    game_state,
+                    include_auxiliary_targets,
+                )
+                if targets is None:
                     continue
 
-                policy /= policy_sum
                 root_index = len(features)
-                child_features.extend(response_child_features)
-                child_values.extend(response_child_values)
-                child_weights.extend(response_child_weights)
-                child_game_ids.extend([game_id] * len(response_child_features))
+                child_features.extend(targets.child_features)
+                child_values.extend(targets.child_values)
+                child_weights.extend(targets.child_weights)
+                child_game_ids.extend([game_id] * len(targets.child_features))
                 child_root_indexes.extend(
-                    [root_index] * len(response_child_features)
+                    [root_index] * len(targets.child_features)
                 )
                 features.append(encode_moka_features(game_state))
-                policies.append(policy)
-                q_values.append(move_q_values)
-                q_weights.append(move_q_weights)
-                values.append(2 * float(response["rootInfo"]["winrate"]) - 1)
+                policies.append(targets.policy)
+                q_values.append(targets.q_values)
+                q_weights.append(targets.q_weights)
+                values.append(targets.value)
                 game_ids.append(game_id)
                 absolute_turn_number = int(response["turnNumber"])
                 absolute_turn_numbers.append(absolute_turn_number)
-                rollout_moves.append(
-                    game_moves[game_id][absolute_turn_number]
-                )
+                rollout_move = game_moves[game_id][absolute_turn_number]
+                rollout_moves.append(rollout_move)
+                branch_parent_indexes.append(-1)
                 if include_auxiliary_targets:
-                    ownership, score = extract_auxiliary_targets(response)
-                    ownerships.append(ownership)
-                    scores.append(score)
+                    if targets.ownership is None or targets.score is None:
+                        raise RuntimeError("Missing requested auxiliary targets.")
+                    ownerships.append(targets.ownership)
+                    scores.append(targets.score)
+                teacher_move = int(np.argmax(targets.policy))
+                branch_state = play_move(game_state, teacher_move)
+                if (
+                    use_teacher_branches
+                    and teacher_move != rollout_move
+                    and branch_state is not None
+                ):
+                    branch_queries.append(
+                        create_analysis_query(
+                            f"branch-{root_index}",
+                            game_moves[game_id][:absolute_turn_number]
+                            + [teacher_move],
+                            visit_count,
+                            [absolute_turn_number + 1],
+                            include_auxiliary_targets,
+                        )
+                    )
+                    branch_states[root_index] = branch_state
+                    branch_game_ids[root_index] = game_id
 
             print(
                 f"analyzed {min(query_batch_start + len(queries), game_count):,}"
                 f"/{game_count:,} games positions={len(features):,}"
+            )
+
+        for query_batch_start in range(
+            0,
+            len(branch_queries),
+            SEARCH_TEACHER_QUERY_BATCH_SIZE,
+        ):
+            query_batch = branch_queries[
+                query_batch_start : query_batch_start
+                + SEARCH_TEACHER_QUERY_BATCH_SIZE
+            ]
+            responses = engine.analyze(query_batch, len(query_batch))
+
+            for response in responses:
+                parent_index = int(response["id"].removeprefix("branch-"))
+                game_id = branch_game_ids[parent_index]
+                game_state = branch_states[parent_index]
+                targets = extract_analysis_targets(
+                    response,
+                    game_state,
+                    include_auxiliary_targets,
+                )
+                if targets is None:
+                    continue
+
+                root_index = len(features)
+                child_features.extend(targets.child_features)
+                child_values.extend(targets.child_values)
+                child_weights.extend(targets.child_weights)
+                child_game_ids.extend([game_id] * len(targets.child_features))
+                child_root_indexes.extend(
+                    [root_index] * len(targets.child_features)
+                )
+                features.append(encode_moka_features(game_state))
+                policies.append(targets.policy)
+                q_values.append(targets.q_values)
+                q_weights.append(targets.q_weights)
+                values.append(targets.value)
+                game_ids.append(game_id)
+                absolute_turn_numbers.append(-1)
+                rollout_moves.append(int(np.argmax(targets.policy)))
+                branch_parent_indexes.append(parent_index)
+                if include_auxiliary_targets:
+                    if targets.ownership is None or targets.score is None:
+                        raise RuntimeError("Missing requested auxiliary targets.")
+                    ownerships.append(targets.ownership)
+                    scores.append(targets.score)
+
+            print(
+                "branches "
+                f"{min(query_batch_start + len(query_batch), len(branch_queries)):,}"
+                f"/{len(branch_queries):,} positions={len(features):,}"
             )
 
         counterfactual_values = np.full(len(features), np.nan, dtype=np.float32)
@@ -830,6 +949,11 @@ def create_search_dataset(
     if include_auxiliary_targets:
         dataset["ownerships"] = np.asarray(ownerships, dtype=np.float16)
         dataset["scores"] = np.asarray(scores, dtype=np.float16)
+    if use_teacher_branches:
+        dataset["branch_parent_indexes"] = np.asarray(
+            branch_parent_indexes,
+            dtype=np.int32,
+        )
     return dataset
 
 
@@ -875,6 +999,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     )
     argument_parser.add_argument("--moka-turns-only", action="store_true")
     argument_parser.add_argument("--auxiliary-targets", action="store_true")
+    argument_parser.add_argument("--teacher-branches", action="store_true")
     argument_parser.add_argument(
         "--rollout-simulations",
         type=int,
@@ -926,6 +1051,7 @@ def main() -> None:
         arguments.rollout_simulations,
         arguments.moka_turns_only,
         arguments.auxiliary_targets,
+        arguments.teacher_branches,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)

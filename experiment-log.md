@@ -3734,3 +3734,58 @@ On 20 fresh games from opening offset 2,910,000:
 Every blend was weaker than the incumbent, and performance declined as the rejected candidate's contribution increased. No blend advanced to confirmation.
 
 Conservative interpolation does not recover a stable gain from deep-critical seed 182. All blends are rejected. The accepted artifact, search, and Million website remain unchanged.
+
+## 2026-07-28 — Teacher-correction side branches
+
+### Method
+
+KataGo training uses side positions to broaden coverage around informative states. Moka's selective reanalysis previously corrected isolated roots but did not teach continuations after the corrected move.
+
+The native generator now has an opt-in teacher-branch path. When b18's searched top move differs from Moka's actual accepted-search move, it:
+
+1. plays the b18 move from the exact selected root;
+2. analyzes the resulting child position with the same native visit budget;
+3. stores its policy, value, searched child values, and optional auxiliary targets;
+4. assigns the branch to the parent game ID so whole-game splits remain intact.
+
+Branch rows record their parent row index. The path is disabled by default and cannot be combined with counterfactual reanalysis. Tests cover visit normalization, parent/child value perspective, and the existing query behavior.
+
+### Fresh corpus
+
+The exact accepted artifact generated 64 Moka-versus-b6 games from opening offset 3,400,000. Moka used accepted 64-visit search. Only Moka turns were eligible, 25% were selected with equal uniform and b6-regret components, and b18 analyzed roots and branches at 128 visits.
+
+The archive contains 572 selected roots and 385 teacher-correction branches across 64 games. It occupies 442,867 compressed bytes and has SHA-256 `e10a590c72df69c4c777c6926e65c1d1a9792bd3e63b833e93bf4c4b57c43539`.
+
+All features, policies, values, and searched child targets are finite. Policies are normalized. Every branch follows its parent and shares its game ID. Moka matches the b18 top move on 35.7% of selected roots and 42.3% of branch positions.
+
+A root-only archive was derived from the exact same 572 root rows. It occupies 63,545 compressed bytes and has SHA-256 `8efc189b10a1ccbeb4d2865b5a4073cb5c25dc1aa3fef13173252a2977388737`.
+
+### Matched policy-linear QAT
+
+Three matched seed pairs used:
+
+- one exact INT8-aware epoch;
+- frozen trunk and policy convolution;
+- policy preservation weight 0.25;
+- both accepted 64-visit search corpora once;
+- sevenfold root-only replay versus fourfold branch replay, approximately 4,000 target rows per arm.
+
+At learning rate 0.000002, all six distinct exact exports reproduced the incumbent exactly on 20 fresh games from opening offset 2,920,000: seven wins, four Black and three White, zero caps, 46 passes, and one resignation. No candidate advanced.
+
+A predeclared final intensity increased only the learning rate to 0.000010. Every exact export remained 111,920 bytes.
+
+On 20 new games from opening offset 2,930,000:
+
+| Player     | Wins | Black | White | Caps |
+| :--------- | ---: | ----: | ----: | ---: |
+| Incumbent  |    8 |     5 |     3 |    0 |
+| Root 231   |    7 |     5 |     2 |    0 |
+| Branch 231 |    8 |     5 |     3 |    0 |
+| Root 232   |    7 |     5 |     2 |    0 |
+| Branch 232 |    7 |     5 |     2 |    0 |
+| Root 233   |    7 |     5 |     2 |    0 |
+| Branch 233 |    7 |     5 |     2 |    0 |
+
+Branch supervision recovered one game over one matched root-only control and tied the incumbent, but no candidate beat production. No candidate advanced to confirmation, and no further intensity was tested.
+
+Teacher-correction side branches provide clean sequential coverage but do not improve this policy-linear continuation recipe. All candidates are rejected. The opt-in generator remains available for future architectures; the accepted artifact, search, and Million website remain unchanged.
