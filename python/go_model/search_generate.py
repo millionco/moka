@@ -574,6 +574,7 @@ def create_search_dataset(
     child_game_ids: list[int] = []
     child_root_indexes: list[int] = []
     absolute_turn_numbers: list[int] = []
+    rollout_moves: list[int] = []
 
     try:
         for query_batch_start in range(
@@ -659,7 +660,11 @@ def create_search_dataset(
                 q_weights.append(move_q_weights)
                 values.append(2 * float(response["rootInfo"]["winrate"]) - 1)
                 game_ids.append(game_id)
-                absolute_turn_numbers.append(int(response["turnNumber"]))
+                absolute_turn_number = int(response["turnNumber"])
+                absolute_turn_numbers.append(absolute_turn_number)
+                rollout_moves.append(
+                    game_moves[game_id][absolute_turn_number]
+                )
 
             print(
                 f"analyzed {min(query_batch_start + len(queries), game_count):,}"
@@ -781,6 +786,7 @@ def create_search_dataset(
         "features": np.asarray(features, dtype=np.float16),
         "game_ids": np.asarray(game_ids, dtype=np.int32),
         "policies": np.asarray(policies, dtype=np.float16),
+        "rollout_moves": np.asarray(rollout_moves, dtype=np.int16),
         "moka_moves": moka_moves,
         "counterfactual_values": counterfactual_values.astype(np.float16),
         "q_values": np.asarray(q_values, dtype=np.float16),

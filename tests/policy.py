@@ -15,6 +15,7 @@ from go_model.policy import (
 from go_model.reweight import (
     calculate_counterfactual_critical_weights,
     calculate_counterfactual_regret_weights,
+    calculate_rollout_regret_weights,
 )
 from go_model.train import calculate_listwise_policy_loss
 
@@ -203,6 +204,44 @@ class GroupRelativePolicyOptimizationTests(unittest.TestCase):
         )
 
         np.testing.assert_array_equal(weights, [0, 1, 4])
+
+    def test_rollout_regret_weights_use_searched_moka_move(self) -> None:
+        policies = np.asarray(
+            [
+                [0.8, 0.2, 0],
+                [0.7, 0.3, 0],
+                [0.6, 0.4, 0],
+            ],
+            dtype=np.float32,
+        )
+        q_values = np.asarray(
+            [
+                [0.7, 0.7, 0],
+                [0.8, 0.4, 0],
+                [0.9, -0.1, 0],
+            ],
+            dtype=np.float32,
+        )
+        q_weights = np.asarray(
+            [
+                [4, 2, 0],
+                [4, 2, 0],
+                [4, 2, 0],
+            ],
+            dtype=np.float32,
+        )
+
+        weights = calculate_rollout_regret_weights(
+            policies,
+            q_values,
+            q_weights,
+            np.asarray([0, 1, 2]),
+        )
+
+        np.testing.assert_allclose(
+            weights,
+            np.asarray([0.25, 1.75, 0.25], dtype=np.float32),
+        )
 
 
 if __name__ == "__main__":

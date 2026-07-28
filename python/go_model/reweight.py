@@ -18,6 +18,7 @@ from go_model.config import (
     REWEIGHT_COUNTERFACTUAL_MODE,
     REWEIGHT_COUNTERFACTUAL_CRITICAL_MODE,
     REWEIGHT_MODES,
+    REWEIGHT_ROLLOUT_REGRET_MODE,
 )
 from go_model.model import MokaNetwork, create_moka_network
 
@@ -145,6 +146,39 @@ def calculate_counterfactual_critical_weights(
     ).astype(np.float32)
 
 
+def calculate_rollout_regret_weights(
+    policies: np.ndarray,
+    q_values: np.ndarray,
+    q_weights: np.ndarray,
+    rollout_moves: np.ndarray,
+) -> np.ndarray:
+    row_indexes = np.arange(len(policies))
+    teacher_moves = np.argmax(policies, axis=1)
+    teacher_values = q_values[row_indexes, teacher_moves]
+    rollout_values = q_values[row_indexes, rollout_moves]
+    is_rollout_value_available = (
+        q_weights[row_indexes, rollout_moves] > 0
+    )
+    regrets = np.where(
+        is_rollout_value_available,
+        teacher_values - rollout_values,
+        0,
+    )
+    normalized_regrets = np.clip(
+        regrets / COUNTERFACTUAL_REGRET_MAXIMUM,
+        0,
+        1,
+    )
+    return (
+        COUNTERFACTUAL_REGRET_BASE_WEIGHT
+        + (
+            COUNTERFACTUAL_REGRET_MAXIMUM_WEIGHT
+            - COUNTERFACTUAL_REGRET_BASE_WEIGHT
+        )
+        * normalized_regrets
+    ).astype(np.float32)
+
+
 def reweight_dataset(
     dataset_path: Path,
     checkpoint_path: Path,
@@ -177,6 +211,13 @@ def reweight_dataset(
             policies,
             dataset["q_values"].astype(np.float32),
             dataset["counterfactual_values"].astype(np.float32),
+        )
+    elif mode == REWEIGHT_ROLLOUT_REGRET_MODE:
+        weights = calculate_rollout_regret_weights(
+            policies,
+            dataset["q_values"].astype(np.float32),
+            dataset["q_weights"].astype(np.float32),
+            dataset["rollout_moves"].astype(np.int64),
         )
     elif mode == REWEIGHT_COUNTERFACTUAL_MODE:
         weights = calculate_counterfactual_regret_weights(

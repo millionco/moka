@@ -3189,3 +3189,71 @@ The unique screen winner was frozen before confirmation.
 |      **Total** |         **82** |         **76** |          **0** |          **0** |
 
 The blend improved by one game on the first block and regressed by seven on the second. It lost six games in aggregate and was rejected. The accepted checkpoint, exact 111,920-byte INT8 artifact, and runtime search remain unchanged. No Million website files were touched.
+
+## 2026-07-28 — Policy-isolated b18 correction
+
+### Hypothesis
+
+The accepted-search b18 continuation improved held-out policy and value metrics but lost five games in confirmation. Updating the trunk and value head may have damaged the existing search evaluator. Restricting training to the policy head can import move-choice signal while preserving every trunk and value tensor exactly.
+
+Three one-epoch candidates started from the accepted exact-dequantized artifact. All used the corrected b18 corpus, both accepted 64-visit search corpora as replay, batch size 128, and policy-preservation weight 0.25:
+
+| Candidate                    | Trainable tensors | Learning rate | Test loss | Test move | Test value MAE |
+| ---------------------------- | ----------------: | ------------: | --------: | --------: | -------------: |
+| Linear only                  |                 2 |      0.000010 |    3.1450 |     36.1% |         0.6016 |
+| Complete policy head         |                 4 |      0.000005 |    3.1484 |     36.6% |         0.6016 |
+| Policy head, stronger anchor |                 4 |      0.000010 |    3.1531 |     37.0% |         0.6016 |
+
+Tensor comparison verified that the linear candidate changed only `policy_linear.weight` and `policy_linear.bias`. Every trunk and value parameter remained bit-identical. Each exact INT8 export remained 111,920 bytes.
+
+On 20 fresh games from opening offset 2,550,000, the incumbent scored seven wins. The linear and low-rate complete-head candidates scored eight, while the stronger-anchor candidate scored six. All had zero caps. The linear candidate advanced because it changed fewer tensors and had the better held-out loss among the screen leaders.
+
+| Opening offset | Incumbent wins | Linear wins | Incumbent caps | Linear caps |
+| -------------: | -------------: | ----------: | -------------: | ----------: |
+|      2,560,000 |             37 |          38 |              0 |           0 |
+|      2,570,000 |             40 |          39 |              0 |           0 |
+|      **Total** |         **77** |      **77** |          **0** |       **0** |
+
+The candidate moved one win between blocks but did not improve the aggregate. It was rejected.
+
+### Raw-policy disagreement weighting
+
+The accepted raw policy disagreed with the b18 top move on 1,220 of 2,116 roots. Those rows received eight times the weight of agreement rows, normalized to mean one. Linear candidates at learning rates 0.000005 and 0.000010 and a complete-head candidate at 0.000005 were screened on opening offset 2,580,000.
+
+The incumbent and all three candidates scored exactly nine wins with zero caps. Both linear candidates reproduced every aggregate counter exactly. Raw-policy disagreement was therefore too broad and mostly inert.
+
+## 2026-07-28 — Actual-search rollout regret
+
+### Hypothesis
+
+Raw-policy disagreement does not identify mistakes made by the accepted 64-visit player. Recording Moka's actual searched rollout move at every b18-labeled root allows teacher action values to estimate the consequence of the move Moka really played.
+
+The search generator now stores `rollout_moves` aligned with the existing root features, policies, and child values. A new rollout-regret weighting mode compares the b18 value of its top-visit move with the b18 value of Moka's searched move. Missing searched-move values and non-regrets retain the minimum weight.
+
+The identical 64 games from opening offset 2,481,000 were regenerated. Native analysis responses arrived in a different order, but all 2,116 `(game ID, feature state)` keys exactly matched the earlier corpus. The new archive is 871,068 bytes with SHA-256 `50e8ffc9ebc1cc29025230addadee391c34ad8627c082b319941fe1c9fd1fbec`.
+
+B18 evaluated Moka's selected move on 90.1% of roots. Moka selected the b18 top move on 45.7%, but most disagreements were value-equivalent:
+
+| Minimum b18 regret | Fraction of all roots |
+| -----------------: | --------------------: |
+|               0.05 |                 7.37% |
+|               0.10 |                 5.81% |
+|               0.20 |                 4.06% |
+|               0.40 |                 2.08% |
+|               0.80 |                 0.71% |
+
+Among covered moves, mean regret was 0.0306 and median regret was zero. The weighted archive had SHA-256 `fa0efe5383888daa2122746125ab388874b4f7d83e33bb5aa2a7911525788d7c`. Its mean weight was 0.344, with 86 rows at weight one or greater and 37 at weight two or greater.
+
+Three linear-only candidates retained the accepted trunk and value tensors:
+
+| Candidate | Epochs | Learning rate | Test loss | Test move | Test value MAE |
+| --------- | -----: | ------------: | --------: | --------: | -------------: |
+| Low rate  |      1 |      0.000010 |    3.1660 |     38.0% |         0.6015 |
+| High rate |      1 |      0.000020 |    3.1676 |     39.4% |         0.6015 |
+| Two epoch |      2 |      0.000010 |    3.1660 |     38.0% |         0.6015 |
+
+The incumbent scored 3.1611 loss, 38.0% top-move agreement, and 0.6015 value MAE on the same test games. The low-rate and two-epoch exports quantized to identical bytes.
+
+On 20 fresh exact-INT8 games from opening offset 2,590,000, the incumbent and both unique candidates scored eight wins, with three Black wins, five White wins, and zero caps. The candidates changed pass counts but not game outcomes. They were rejected without confirmation.
+
+This experiment shows that top-move disagreement greatly overstates actual search mistakes: only about one in 25 reached roots has b18 regret of at least 0.2. The rollout-move and regret instrumentation remains because it enables a larger targeted corpus without changing ordinary collection or training defaults. The accepted checkpoint, exact 111,920-byte INT8 artifact, runtime search, and Million website remain unchanged.
