@@ -42,6 +42,7 @@ from go_model.config import (
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
+    SEARCH_ROOT_SYMMETRY_TOP_MOVE_VOTE_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_TRIMMED_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_TRIMMED_VALUE_WEIGHT,
     SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
@@ -250,6 +251,9 @@ def run_arena(
     root_symmetry_rank_minimum_top_move_vote_count: int = (
         SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT
     ),
+    root_symmetry_top_move_vote_policy_weight: float = (
+        SEARCH_ROOT_SYMMETRY_TOP_MOVE_VOTE_POLICY_WEIGHT
+    ),
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -292,6 +296,9 @@ def run_arena(
             ),
             symmetry_rank_minimum_top_move_vote_count=(
                 root_symmetry_rank_minimum_top_move_vote_count
+            ),
+            symmetry_top_move_vote_policy_weight=(
+                root_symmetry_top_move_vote_policy_weight
             ),
         )
         if use_root_symmetry_ensemble
@@ -603,6 +610,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT,
     )
     argument_parser.add_argument(
+        "--root-symmetry-top-move-vote-policy-weight",
+        type=float,
+        default=SEARCH_ROOT_SYMMETRY_TOP_MOVE_VOTE_POLICY_WEIGHT,
+    )
+    argument_parser.add_argument(
         "--root-branches",
         type=int,
         default=SEARCH_ROOT_BRANCH_COUNT,
@@ -693,6 +705,7 @@ def main() -> None:
         arguments.root_symmetry_rank_moves,
         arguments.root_symmetry_rank_end_move,
         arguments.root_symmetry_rank_minimum_top_move_votes,
+        arguments.root_symmetry_top_move_vote_policy_weight,
     )
 
 

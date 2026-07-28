@@ -41,6 +41,7 @@ from go_model.config import (
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
+    SEARCH_ROOT_SYMMETRY_TOP_MOVE_VOTE_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_TRIMMED_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_TRIMMED_VALUE_WEIGHT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
@@ -99,6 +100,9 @@ class MokaEvaluator:
         symmetry_rank_minimum_top_move_vote_count: int = (
             SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT
         ),
+        symmetry_top_move_vote_policy_weight: float = (
+            SEARCH_ROOT_SYMMETRY_TOP_MOVE_VOTE_POLICY_WEIGHT
+        ),
     ) -> None:
         self.model = model
         self.use_symmetry_ensemble = use_symmetry_ensemble
@@ -117,6 +121,9 @@ class MokaEvaluator:
         )
         self.symmetry_rank_minimum_top_move_vote_count = (
             symmetry_rank_minimum_top_move_vote_count
+        )
+        self.symmetry_top_move_vote_policy_weight = (
+            symmetry_top_move_vote_policy_weight
         )
         self.cache: dict[
             tuple[bytes, int, int, tuple[int, ...]],
@@ -257,6 +264,7 @@ class MokaEvaluator:
                             ),
                             self.symmetry_rank_move_count,
                             self.symmetry_rank_minimum_top_move_vote_count,
+                            self.symmetry_top_move_vote_policy_weight,
                         ),
                         aggregate_symmetry_values(
                             value_array[symmetry_start:symmetry_end],

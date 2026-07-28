@@ -125,6 +125,23 @@ class SymmetryTest(unittest.TestCase):
         self.assertGreater(gated_policy[0], gated_policy[1])
         self.assertGreater(active_policy[1], active_policy[0])
 
+    def test_top_move_vote_policy_rewards_orientation_choice(self) -> None:
+        policies = [
+            np.asarray([0.99, 0.01], dtype=np.float32),
+            np.asarray([0.49, 0.51], dtype=np.float32),
+            np.asarray([0.49, 0.51], dtype=np.float32),
+        ]
+
+        arithmetic_policy = aggregate_symmetry_policies(policies, 0)
+        vote_policy = aggregate_symmetry_policies(
+            policies,
+            0,
+            top_move_vote_policy_weight=1,
+        )
+
+        self.assertGreater(arithmetic_policy[0], arithmetic_policy[1])
+        self.assertGreater(vote_policy[1], vote_policy[0])
+
     def test_policy_and_features_transform_together(self) -> None:
         features = np.zeros(
             (BOARD_SIZE, BOARD_SIZE, INPUT_PLANE_COUNT),

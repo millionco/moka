@@ -45,6 +45,7 @@ def aggregate_symmetry_policies(
     rank_policy_weight: float = 0,
     rank_move_count: int = 8,
     rank_minimum_top_move_vote_count: int = 0,
+    top_move_vote_policy_weight: float = 0,
 ) -> np.ndarray:
     if not 0 <= geometric_policy_weight <= 1:
         raise ValueError("Geometric policy weight must be between zero and one.")
@@ -54,6 +55,9 @@ def aggregate_symmetry_policies(
 
     if not 0 <= rank_policy_weight <= 1:
         raise ValueError("Rank policy weight must be between zero and one.")
+
+    if not 0 <= top_move_vote_policy_weight <= 1:
+        raise ValueError("Top-move vote weight must be between zero and one.")
 
     policy_array = np.asarray(policies, dtype=np.float32)
     arithmetic_policy = np.mean(policy_array, axis=0)
@@ -95,12 +99,17 @@ def aggregate_symmetry_policies(
             + trimmed_policy_weight * trimmed_policy
         )
 
-    if rank_policy_weight > 0:
-        rank_scores = np.zeros(policy_array.shape[1], dtype=np.float32)
+    if rank_policy_weight > 0 or top_move_vote_policy_weight > 0:
         top_move_vote_counts = np.zeros(
             policy_array.shape[1],
             dtype=np.int32,
         )
+
+        for policy in policy_array:
+            top_move_vote_counts[int(np.argmax(policy))] += 1
+
+    if rank_policy_weight > 0:
+        rank_scores = np.zeros(policy_array.shape[1], dtype=np.float32)
         rank_weights = np.arange(
             rank_move_count,
             0,
@@ -111,7 +120,6 @@ def aggregate_symmetry_policies(
         for policy in policy_array:
             ranked_moves = np.argsort(policy)[-rank_move_count:][::-1]
             rank_scores[ranked_moves] += rank_weights
-            top_move_vote_counts[ranked_moves[0]] += 1
 
         if (
             np.max(top_move_vote_counts)
@@ -122,6 +130,15 @@ def aggregate_symmetry_policies(
                 (1 - rank_policy_weight) * blended_policy
                 + rank_policy_weight * rank_policy
             )
+
+    if top_move_vote_policy_weight > 0:
+        top_move_vote_policy = top_move_vote_counts / np.sum(
+            top_move_vote_counts
+        )
+        blended_policy = (
+            (1 - top_move_vote_policy_weight) * blended_policy
+            + top_move_vote_policy_weight * top_move_vote_policy
+        )
 
     return blended_policy / np.sum(blended_policy)
 

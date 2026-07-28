@@ -2252,3 +2252,75 @@ Every win completed normally. Four votes was frozen as the clear screen leader.
 On 100 untouched games from opening offset 1,650,000, the accepted geometric control scored 35 wins with seven caps. The four-vote rank candidate scored 38 wins with eleven caps. Every win completed normally; the control took 263.5 seconds and the candidate took 278.9 seconds.
 
 Confidence gating added three completed wins but four unfinished games. It failed the predeclared no-cap-regression gate after the first confirmation block and was rejected without testing another threshold on the confirmation openings. The browser remains unchanged.
+
+## 2026-07-28 — Late area-value blend
+
+The current area score was blended into Moka's value estimate only as the game progressed, beginning at move 40 and reaching its configured maximum at move 80. This used only the public board state and ordinary area-scoring rules. It did not query KataGo, inspect future moves, change legal moves, or add model evaluations.
+
+On 20 fresh games from opening offset 1,660,000, maximum area weights 0, 0.05, 0.10, 0.20, 0.30, and 0.50 all scored eight wins with zero caps. Every setting preserved the five-Black, three-White win split. Weights at or above 0.20 changed pass behavior but not a single outcome.
+
+The phase-ramped area signal was behaviorally neutral at the measured strength gate and did not advance to confirmation. Production retains the learned value without an area-score blend.
+
+## 2026-07-28 — Top-choice symmetry voting
+
+The broad top-eight Borda blend was replaced with a sparse distribution containing only the move each aligned symmetry policy ranked first. Blending this vote distribution into the accepted geometric aggregate tests whether independent top-choice agreement preserves the useful symmetry signal without reshaping dozens of lower-priority moves.
+
+On 20 fresh games from opening offset 1,670,000:
+
+| Top-choice vote blend | Wins | Caps |
+| --------------------: | ---: | ---: |
+|                  0.00 |    7 |    2 |
+|                  0.10 |    6 |    2 |
+|                  0.25 |    5 |    2 |
+|                  0.50 |    5 |    1 |
+|                  0.75 |    5 |    1 |
+|                  1.00 |    5 |    1 |
+
+Every win completed normally. The smallest vote blend lost one completed game, while every larger blend lost two. Top-choice voting was rejected without confirmation and was never added to the browser.
+
+## 2026-07-28 — Rank consensus with late area value
+
+### Hypothesis
+
+Full-game rank consensus had repeatedly added wins and caps. The phase-ramped area value was neutral by itself but changed late pass behavior. Combining them tested whether the rules-derived late signal could preserve rank consensus's tactical gain while removing its unfinished games.
+
+### Screen
+
+On 20 fresh games from opening offset 1,680,000, production and the 0.50 rank blend each scored seven wins with two caps. Adding late area weights 0.10, 0.20, and 0.50 to the rank blend also scored seven wins with two caps. Weight 0.30 scored eight wins with two caps and was frozen as the only completed-win improvement.
+
+### Fresh confirmation
+
+On 100 untouched games from opening offset 1,690,000, production scored 35 wins with four caps. The frozen rank-plus-area candidate scored 36 wins with eight caps. Every win completed normally; production took 256.5 seconds and the candidate took 279.7 seconds.
+
+The combined candidate added one completed win but doubled unfinished games. It failed the no-cap-regression gate after the first confirmation block and was rejected. Production remains on geometric symmetry consensus without rank or area blending.
+
+## 2026-07-28 — PUCT value weight under geometric consensus
+
+### Screen
+
+The policy–value balance was retuned because the previous sweep used a 28-visit player before geometric symmetry consensus. The exact current checkpoint, 56-visit budget, one-leaf topology, root symmetry, 0.25 geometric policy blend, exploration 2.0, FPU 0.25, full branching, and maximum-visit move selection were held fixed.
+
+On 20 fresh games from opening offset 1,700,000:
+
+| Value weight | Wins | Caps |
+| -----------: | ---: | ---: |
+|         0.50 |    8 |    3 |
+|         0.75 |    8 |    2 |
+|         1.00 |    8 |    2 |
+|         1.25 |   11 |    0 |
+|         1.50 |    7 |    1 |
+|         2.00 |    8 |    1 |
+
+Weight 1.25 was frozen as the unique joint screen winner. No intermediate value was tested after observing the screen.
+
+### Independent confirmation
+
+Two disjoint 100-game blocks compared the frozen candidate with production:
+
+| Opening offset | Weight 1.00 | 1.00 caps | Weight 1.25 | 1.25 caps |
+| -------------: | ----------: | --------: | ----------: | --------: |
+|      1,710,000 |          32 |        10 |          34 |         7 |
+|      1,720,000 |          39 |         6 |          45 |         9 |
+|      **Total** |      **71** |    **16** |      **79** |    **16** |
+
+Every win completed normally. Weight 1.25 added eight completed wins without increasing caps, model evaluations, model bytes, or browser payload. It is accepted for the browser.
