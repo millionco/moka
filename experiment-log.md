@@ -2783,3 +2783,69 @@ On 20 fresh games from opening offset 2,150,000:
 |         128 |    8 |     4 |     4 |    0 |   71.6s |
 
 Every schedule tied exactly on wins, colors, caps, and resignations. Thirty-two late visits reduced runtime by about 6%, but speed alone does not satisfy the strength gate. No schedule advanced, and constant 64 visits remain the accepted research default.
+
+## 2026-07-28 — Stronger native b18 teacher on accepted-Moka trajectories
+
+### Hypothesis
+
+Repeated b6 and self-search targets stopped compounding. A stronger native 9×9 b18 teacher might provide useful policy corrections that b6 cannot, while low-rate continuation and preservation replay protect the accepted player.
+
+KataGo b18 was used only offline to label fixed trajectories. Arena move selection remained Moka's 104,129-parameter checkpoint with the accepted 64-visit search.
+
+### Corpus and training
+
+Sixty-four deterministic accepted-Moka-versus-b6 games from opening offset 2,170,000 were analyzed at 32 native b18 visits per position. The corpus contained 4,224 positions. Policies averaged 7.6 supported moves and 0.484 top-move probability. Its SHA-256 was `18d6d2d3e3ae1789f87a9ba82c3ef3e731965c1a8e9fb7922279d49a0feaad35`.
+
+Bounded policy-surprise weights had mean 1.0, 95th percentile 1.66, and maximum 3.38. The weighted archive SHA-256 was `e7ae3ec983478ab1e161483ae87c2e0561bf988d6d9792fa43367eea72cfe9c1`.
+
+Seeds 101, 102, and 103 used one full-network epoch at learning rate 0.000002, incumbent-logit preservation weight 0.25, fourfold training-only b18 replay, the first accepted-search corpus, and the 20,000-position browser on-policy replay set.
+
+Seed 101 improved b18 test loss from 2.5665 to 2.5317 and value MAE from 0.3184 to 0.3043. It reduced accepted-search agreement from 68.3% to 66.7%.
+
+### Full-candidate gate
+
+On 20 fresh games from opening offset 2,180,000, the incumbent scored eight wins. Seeds 101, 102, and 103 scored eleven, eight, and ten, all with zero caps. Seed 101 was frozen.
+
+| Opening offset | Incumbent wins | Incumbent caps | Seed 101 wins | Seed 101 caps |
+| -------------: | -------------: | -------------: | ------------: | ------------: |
+|      2,190,000 |             38 |              2 |            40 |             2 |
+|      2,200,000 |             43 |              0 |            37 |             0 |
+|      **Total** |         **81** |          **2** |        **77** |         **2** |
+
+The full stronger-teacher update was rejected.
+
+### Conservative float interpolation
+
+Fixed 25%, 50%, and 75% seed-101 blends were screened on fresh offset 2,210,000. The incumbent and blends scored four, four, ten, and seven wins. The 75% blend added a cap; the 50% blend was frozen as the unique completed-win leader.
+
+| Opening offset | Incumbent wins | Incumbent caps | 50% blend wins | 50% blend caps |
+| -------------: | -------------: | -------------: | -------------: | -------------: |
+|      2,220,000 |             46 |              0 |             48 |              0 |
+|      2,230,000 |             44 |              0 |             49 |              0 |
+|      **Total** |         **90** |          **0** |         **97** |          **0** |
+
+The float blend improved both blocks by seven wins in aggregate. Its architecture and 111,920-byte INT8 size were unchanged.
+
+### Exact INT8 rejection
+
+Ordinary INT8 export preserved offline b18 loss but did not preserve arena strength:
+
+| Opening offset | Current INT8 | Candidate INT8 | Current caps | Candidate caps |
+| -------------: | -----------: | -------------: | -----------: | -------------: |
+|      2,240,000 |           49 |             43 |            0 |              0 |
+|      2,250,000 |           43 |             33 |            0 |              0 |
+|      **Total** |       **92** |         **76** |        **0** |          **0** |
+
+The ordinary candidate was rejected as quantization-fragile.
+
+A deployment-aware salvage anchored 25%, 50%, and 75% stronger-teacher blends to the exact dequantized current INT8 artifact before exporting. On a 20-game exact-INT8 screen at offset 2,260,000, the current artifact scored nine wins; 25% and 50% scored ten without caps, while 75% scored ten with one cap-awarded win. The conservative 25% blend was frozen.
+
+| Opening offset | Current INT8 | Anchored 25% | Current caps | Candidate caps |
+| -------------: | -----------: | -----------: | -----------: | -------------: |
+|      2,270,000 |           36 |           38 |            1 |              1 |
+|      2,280,000 |           42 |           39 |            0 |              0 |
+|      **Total** |       **78** |       **77** |        **1** |          **1** |
+
+The deployment-aware blend improved one block and regressed the other, losing one game in aggregate. It is rejected.
+
+The stronger teacher contains useful float signal, but neither ordinary nor deployment-aware INT8 export cleared the exact-artifact gate. The accepted Moka checkpoint and artifact remain unchanged. No website files were touched.
