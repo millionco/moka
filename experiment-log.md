@@ -3683,3 +3683,35 @@ On 20 fresh games from opening offset 2,890,000:
 Ownership and score supervision improved one matched seed by one game and tied the other two, but every continuation remained below the incumbent. No candidate advanced to confirmation, and no auxiliary-weight tuning was performed.
 
 Fresh, correctly aligned spatial targets and bounded score targets do not improve the accepted full-network continuation recipe. The collection and normalization fixes remain useful research infrastructure, but every candidate is rejected. The accepted artifact, search, and Million website remain unchanged.
+
+## 2026-07-28 — Fresh searched child-Q auxiliary
+
+The fresh 128-visit selective corpus also contains native b18 values and edge visits for every searched child. All 1,077 roots have finite child-Q targets, with a mean 9.9 and median eight searched children per root. The archive contains 137,852 total child visits.
+
+Three child-Q candidates reused the exact matched-control protocol from the ownership experiment:
+
+- seeds 201, 202, and 203;
+- one epoch at learning rate 0.000002;
+- fourfold fresh-corpus replay;
+- both accepted 64-visit search corpora once;
+- batch size 128;
+- policy preservation weight 0.25;
+- the exact accepted checkpoint as initialization.
+
+The only difference from each control was a training-only searched child-Q head with visit-weighted loss. The Q head was stripped before export. All three exact INT8 exports were distinct and remained 111,920 bytes.
+
+On 20 fresh games from opening offset 2,900,000:
+
+| Player      | Wins | Black | White | Caps |
+| :---------- | ---: | ----: | ----: | ---: |
+| Incumbent   |   10 |     5 |     5 |    1 |
+| Control 201 |    5 |     4 |     1 |    0 |
+| Q 201       |    5 |     4 |     1 |    0 |
+| Control 202 |    8 |     4 |     4 |    0 |
+| Q 202       |    8 |     4 |     4 |    0 |
+| Control 203 |    6 |     4 |     2 |    0 |
+| Q 203       |    6 |     4 |     2 |    0 |
+
+The incumbent's cap was a losing game and did not contribute a win. Every Q candidate exactly tied its matched control on wins and colors, and every continuation remained below the incumbent. No candidate advanced.
+
+Current-player searched child-Q supervision at this continuation scale changes exact model bytes but does not improve play. All Q candidates are rejected. The accepted artifact, search, and Million website remain unchanged.
