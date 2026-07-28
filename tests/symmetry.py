@@ -8,6 +8,7 @@ from go_model.config import (
     BOARD_SYMMETRY_ROTATION_COUNT,
     INPUT_PLANE_COUNT,
 )
+from go_model.symmetry_distill import mix_source_and_consensus_targets
 from go_model.symmetry import (
     aggregate_symmetry_policies,
     aggregate_symmetry_values,
@@ -20,6 +21,50 @@ from go_model.symmetry import (
 
 
 class SymmetryTest(unittest.TestCase):
+    def test_source_and_consensus_targets_mix_by_weight(self) -> None:
+        source_policies = np.asarray(
+            [[0.8, 0.2], [0.1, 0.9]],
+            dtype=np.float32,
+        )
+        source_values = np.asarray([0.75, -0.25], dtype=np.float32)
+        consensus_policies = np.asarray(
+            [[0.4, 0.6], [0.5, 0.5]],
+            dtype=np.float32,
+        )
+        consensus_values = np.asarray([0.25, 0.5], dtype=np.float32)
+
+        mixed_policies, mixed_values = (
+            mix_source_and_consensus_targets(
+                source_policies,
+                source_values,
+                consensus_policies,
+                consensus_values,
+                0.25,
+            )
+        )
+
+        np.testing.assert_allclose(
+            mixed_policies,
+            np.asarray([[0.5, 0.5], [0.4, 0.6]], dtype=np.float32),
+        )
+        np.testing.assert_allclose(
+            mixed_values,
+            np.asarray([0.375, 0.3125], dtype=np.float32),
+        )
+
+    def test_source_and_consensus_target_weight_is_bounded(self) -> None:
+        policies = np.asarray([[0.5, 0.5]], dtype=np.float32)
+        values = np.asarray([0.5], dtype=np.float32)
+
+        with self.assertRaises(ValueError):
+            mix_source_and_consensus_targets(
+                policies,
+                values,
+                policies,
+                values,
+                1.1,
+            )
+
     def test_geometric_policy_aggregation_rewards_symmetry_consensus(
         self,
     ) -> None:

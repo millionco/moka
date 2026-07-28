@@ -4021,3 +4021,86 @@ Two untouched paired 100-game blocks produced:
 The blend's one-game aggregate edge was smaller than its opposite block-to-block swings. It regressed in the second block and did not retain the promoted model's demonstrated White advantage. The result is indistinguishable from arena variance, so the blend is rejected.
 
 The accepted model, search, browser artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Mixed teacher and symmetry-consensus targets
+
+### Hypothesis
+
+Pure second-generation self-distillation added no new information and regressed offline. Mixing the promoted model's stable eight-view consensus with the original b18 policy and value labels could retain symmetry consistency while restoring a stronger external training signal.
+
+The symmetry-target generator now accepts a bounded source-target weight. It mixes normalized policy distributions and scalar values before writing the training archive. The default remains pure consensus. A separate command materializes an exact INT8-aware checkpoint from a float shadow, replacing the one-off conversion used by earlier experiments. Tests cover target mixing, invalid weights, and exact checkpoint materialization.
+
+Three matched target families used 12.5%, 25%, and 50% source-teacher weight over the same 6,480 positions. The 50% family's archive SHA-256 digests were:
+
+| Opening offset | Target archive SHA-256                                             |
+| -------------: | :----------------------------------------------------------------- |
+|      3,000,000 | `db4ff7b4f343d768c33e41194f6e98f28a29315ebcaa6cd13f3fd4bf936aaa6f` |
+|      3,100,000 | `09583e732be81855f7d8704eccdb61d214c2cd6703fe0dd57a5c76bbe3c5eaef` |
+|      3,500,000 | `8751b56db543cbbda10cd1140bd2ca1ba993dab3904c6a74a7c58824d16d8437` |
+
+Each candidate used seed 266, one full-network INT8-aware epoch, learning rate 0.000010, policy preservation weight 0.25, and the promoted checkpoint as its initialization and preservation reference. Using one seed made source weight the only training variable.
+
+### Offline gate
+
+On the untouched b18 offset-3,500,000 test bucket, the 50% candidate improved loss from 2.9491 to 2.9162 and value error from 0.6076 to 0.5851. On the independent b18 offset-3,300,000 bucket, it improved loss from 2.9976 to 2.9411 and value error from 0.6045 to 0.5716. Its consensus loss regressed from 2.2734 to 2.2931 and top-move agreement fell from 75.6% to 72.4%.
+
+The lighter candidates made smaller or inconsistent teacher improvements. All three advanced to a fixed screen because the offline tradeoff did not identify whether external calibration or consensus agreement mattered more to tree search.
+
+### Arena
+
+On 20 fresh games from opening offset 3,120,000:
+
+| Player               | Wins | Black | White | Caps |
+| :------------------- | ---: | ----: | ----: | ---: |
+| Accepted             |    5 |     3 |     2 |    0 |
+| 12.5% teacher target |    8 |     2 |     6 |    0 |
+| 25% teacher target   |   10 |     3 |     7 |    0 |
+| 50% teacher target   |   11 |     4 |     7 |    0 |
+
+The 50% candidate was frozen as the unique screen leader. Its exact-dequantized checkpoint has SHA-256 `85556c2015a90c431717879fe05dc295d0eccfc7578ac04ed86ed674da914907`.
+
+On 100 untouched paired games from opening offset 3,130,000, the accepted model won 34 games, split 20 Black and 14 White, in 261.0 seconds. The candidate won 30, split 14 Black and 16 White, in 273.1 seconds. Both had zero caps.
+
+The screen gain reversed under confirmation. Better pointwise agreement with b18 values was not enough to preserve the accepted search policy, and the candidate lost four games while running slower. It is rejected without a second confirmation block.
+
+The target mixer and exact-checkpoint materializer remain as reproducible offline tools. The accepted model, search, browser artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Fresh promoted-search distillation
+
+### Hypothesis
+
+Pointwise teacher/consensus mixing improved offline values but weakened play. The promoted model's actual 64-visit distribution has a closer causal relationship to its accepted moves. Distilling fresh searched trajectories into the single-view evaluator could transfer root search quality without adding browser inference work.
+
+The exact accepted artifact played 128 deterministic games from opening offset 3,600,000 against b6c96. Moka used accepted 64-visit search and eight-view root evaluation. Only Moka decision positions were retained. Policy targets blended 75% of the visit distribution with 25% of the legal eight-view root policy; b6 supplied scalar value labels.
+
+The resulting corpus contains 4,216 positions across 128 games: 3,330 training, 438 validation, and 448 test rows by whole-game split. Every target is finite and normalized. The 738,634-byte archive has SHA-256 `9d960febdc17397ded3d065d775934b6afc895a75cad8fb42cb5eed43a2ee182`.
+
+### Exact-QAT candidates
+
+Seeds 267–269 started from the promoted float shadow. Each used one full-network INT8-aware epoch, learning rate 0.000005, and policy preservation weight 0.25. No older trajectory replay was used.
+
+| Player   | Search loss | Search top move | Search value error | b18 loss | Consensus top move |
+| :------- | ----------: | --------------: | -----------------: | -------: | -----------------: |
+| Accepted |      1.9819 |           70.1% |             0.3515 |   2.9491 |              75.6% |
+| Seed 267 |      1.9625 |           67.6% |             0.3373 |   2.9625 |              72.0% |
+| Seed 268 |      1.9625 |           67.9% |             0.3375 |   2.9638 |              72.0% |
+| Seed 269 |      1.9614 |           67.6% |             0.3365 |   2.9620 |              72.0% |
+
+Dense search loss and value error improved, but decisive top-move agreement and both independent policy metrics regressed.
+
+On 20 fresh games from opening offset 3,610,000:
+
+| Player   | Wins | Black | White | Caps |
+| :------- | ---: | ----: | ----: | ---: |
+| Accepted |    5 |     3 |     2 |    0 |
+| Seed 267 |    6 |     4 |     2 |    0 |
+| Seed 268 |    8 |     5 |     3 |    0 |
+| Seed 269 |    8 |     4 |     4 |    0 |
+
+Seeds 268 and 269 tied the screen lead. Seed 269 was frozen because it had the best primary-corpus test loss and value error. Its exact-dequantized checkpoint has SHA-256 `e2e51a93c5cc92362036f39201d64e7da5c33d86528eb45dbf41fdee58dc7176`.
+
+On 100 untouched paired games from opening offset 3,620,000, the accepted model won 43 games, split 25 Black and 18 White, in 261.6 seconds. Seed 269 won 38, split 24 Black and 14 White, in 257.7 seconds. Both had zero caps.
+
+The screen gain reversed by five games under confirmation. Dense visit-distribution matching softened decisive choices that the accepted tree needed. This branch is rejected without a second confirmation block. Future search distillation should protect ranked or high-visit actions explicitly rather than optimize dense cross-entropy alone.
+
+The accepted model, search, browser artifact, and Million website remain unchanged.
