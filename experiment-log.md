@@ -3630,3 +3630,56 @@ The frozen composite then played two new 100-game blocks:
 The composite regressed on both fresh blocks and produced a different losing repetition cap. Seed 182, margin 55, and the deep-critical training branch are rejected.
 
 Deeper selective reanalysis increased target coverage and material-regret density at equal teacher-visit cost, but sparse policy-linear QAT did not convert that offline signal into reproducible playing strength. The accepted artifact remains SHA-256 `5d38b3d3f88582212065e6d2aee7b5d638c13e3c4ccaf9e1cab1cd341f757714`, 111,920 bytes. The accepted search and Million website remain unchanged.
+
+## 2026-07-28 — Fresh selective ownership and score auxiliaries
+
+### Pipeline correction
+
+The native selective-reanalysis collector retained b18 policy, value, and searched child values but discarded b18 ownership and score outputs. It now has an opt-in auxiliary-target path that requests root ownership from KataGo analysis and stores the ownership map and root score lead alongside the exact selected root.
+
+KataGo analysis reports ownership in top-left row-major board order. The analysis engine is configured with `reportAnalysisWinratesAs=SIDETOMOVE`, matching Moka's current-player feature perspective.
+
+The training-only score head uses `tanh`, but existing score preprocessing allowed normalized targets beyond its \([-1,1]\) range. Score targets are now clipped after dividing by the 40-point normalization scale. Tests cover auxiliary query routing, ownership order, score extraction, and bounded score normalization. Auxiliary collection remains disabled by default.
+
+### Fresh corpus
+
+The exact accepted artifact generated 128 Moka-versus-b6 games from opening offset 3,300,000. Moka used accepted 64-visit search. Only Moka turns were eligible, 25% were selected with equal uniform and b6-regret components, and native b18 analyzed each selected root at 128 visits with ownership enabled.
+
+The archive contains 1,077 roots across 128 games and occupies 618,549 compressed bytes. Its SHA-256 is `33a1255efaa8f0e8f2dd0a5700b603d75d190c5ac324be49a13dd8bbda60212e`.
+
+All policy, value, ownership, and score targets are finite. The whole-game split contains 878 training, 96 validation, and 103 test roots. Mean ownership is +0.562 on current-player stones and -0.718 on opponent stones, confirming perspective alignment. Score leads range from -87.8 to +87.4 points; 6.0% are clipped to the representable training range.
+
+Loading the accepted checkpoint into the training-only auxiliary network preserves all 108 shared parameter tensors exactly before training.
+
+### Matched ablation
+
+Three matched seeds compared an ordinary continuation with an ownership-plus-score continuation. Every run used:
+
+- one epoch at learning rate 0.000002;
+- fourfold replay of the fresh corpus;
+- both accepted 64-visit search corpora once;
+- batch size 128;
+- policy preservation weight 0.25;
+- the exact accepted checkpoint as initialization.
+
+The auxiliary arm added only training-time ownership and score heads, ownership weight 0.02, and the fixed score weight 0.1. Auxiliary tensors were stripped before export.
+
+Control and auxiliary validation loss, test loss, and move agreement were nearly identical within each seed. All six exact INT8 exports were distinct and remained 111,920 bytes.
+
+### Exact-artifact screen
+
+On 20 fresh games from opening offset 2,890,000:
+
+| Player        | Wins | Black | White | Caps |
+| :------------ | ---: | ----: | ----: | ---: |
+| Incumbent     |   10 |     6 |     4 |    0 |
+| Control 201   |    8 |     5 |     3 |    0 |
+| Auxiliary 201 |    9 |     6 |     3 |    0 |
+| Control 202   |    8 |     5 |     3 |    0 |
+| Auxiliary 202 |    8 |     5 |     3 |    0 |
+| Control 203   |    7 |     5 |     2 |    0 |
+| Auxiliary 203 |    7 |     5 |     2 |    0 |
+
+Ownership and score supervision improved one matched seed by one game and tied the other two, but every continuation remained below the incumbent. No candidate advanced to confirmation, and no auxiliary-weight tuning was performed.
+
+Fresh, correctly aligned spatial targets and bounded score targets do not improve the accepted full-network continuation recipe. The collection and normalization fixes remain useful research infrastructure, but every candidate is rejected. The accepted artifact, search, and Million website remain unchanged.

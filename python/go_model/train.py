@@ -53,6 +53,14 @@ def normalize_sample_weights(sample_weights: mx.array) -> mx.array:
     )
 
 
+def normalize_score_targets(scores: np.ndarray) -> np.ndarray:
+    return np.clip(
+        scores / SCORE_NORMALIZATION_POINTS,
+        -1,
+        1,
+    )
+
+
 def calculate_listwise_policy_loss(
     policy_logits: mx.array,
     policy_targets: mx.array,
@@ -377,7 +385,7 @@ def train(
         else np.zeros(len(features), dtype=np.float32)
     )
     scores = (
-        dataset["scores"].astype(np.float32) / SCORE_NORMALIZATION_POINTS
+        normalize_score_targets(dataset["scores"].astype(np.float32))
         if "scores" in dataset
         else np.zeros(len(features), dtype=np.float32)
     )
@@ -458,8 +466,9 @@ def train(
             else np.zeros(len(supplemental_features), dtype=np.float32)
         )
         supplemental_scores = (
-            supplemental_dataset["scores"].astype(np.float32)
-            / SCORE_NORMALIZATION_POINTS
+            normalize_score_targets(
+                supplemental_dataset["scores"].astype(np.float32)
+            )
             if "scores" in supplemental_dataset
             else np.zeros(len(supplemental_features), dtype=np.float32)
         )

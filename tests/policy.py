@@ -21,6 +21,7 @@ from go_model.reweight import (
 from go_model.train import (
     calculate_listwise_policy_loss,
     normalize_sample_weights,
+    normalize_score_targets,
 )
 
 
@@ -42,6 +43,16 @@ class FeatureLogitModel:
 
 
 class GroupRelativePolicyOptimizationTests(unittest.TestCase):
+    def test_score_targets_are_bounded_to_the_auxiliary_output(self) -> None:
+        normalized_scores = normalize_score_targets(
+            np.asarray([-96, -40, 0, 40, 96], dtype=np.float32)
+        )
+
+        np.testing.assert_allclose(
+            normalized_scores,
+            np.asarray([-1, -1, 0, 1, 1], dtype=np.float32),
+        )
+
     def test_zero_sample_weights_remain_finite(self) -> None:
         normalized_weights = normalize_sample_weights(mx.zeros(8))
 

@@ -460,8 +460,9 @@ def create_analysis_query(
     moves: list[int],
     visit_count: int,
     analyze_turns: list[int] | None = None,
+    include_auxiliary_targets: bool = False,
 ) -> dict:
-    return {
+    query = {
         "id": str(game_id),
         "moves": [
             [
@@ -482,6 +483,23 @@ def create_analysis_query(
         "maxVisits": visit_count,
         "analysisPVLen": 1,
     }
+    if include_auxiliary_targets:
+        query["includeOwnership"] = True
+    return query
+
+
+def extract_auxiliary_targets(
+    response: dict,
+) -> tuple[np.ndarray, float]:
+    ownership = np.asarray(response["ownership"], dtype=np.float32)
+    if ownership.shape != (BOARD_AREA,):
+        raise ValueError(
+            f"Expected {BOARD_AREA} ownership values, received {ownership.shape}."
+        )
+    return (
+        ownership.reshape(BOARD_SIZE, BOARD_SIZE),
+        float(response["rootInfo"]["scoreLead"]),
+    )
 
 
 def convert_parent_value_to_child(value: float) -> float:
@@ -506,6 +524,7 @@ def create_search_dataset(
     use_middle_game_reanalysis: bool,
     rollout_simulation_count: int,
     use_moka_turns_only: bool,
+    include_auxiliary_targets: bool,
 ) -> dict[str, np.ndarray]:
     game_state_histories, game_moves, game_surprises = generate_rollout_games(
         checkpoint_path,
@@ -575,6 +594,8 @@ def create_search_dataset(
     child_root_indexes: list[int] = []
     absolute_turn_numbers: list[int] = []
     rollout_moves: list[int] = []
+    ownerships: list[np.ndarray] = []
+    scores: list[float] = []
 
     try:
         for query_batch_start in range(
@@ -597,6 +618,7 @@ def create_search_dataset(
                     game_moves[game_id],
                     visit_count,
                     absolute_analysis_turns[game_id],
+                    include_auxiliary_targets,
                 )
                 for game_id in query_game_ids
             ]
@@ -665,6 +687,10 @@ def create_search_dataset(
                 rollout_moves.append(
                     game_moves[game_id][absolute_turn_number]
                 )
+                if include_auxiliary_targets:
+                    ownership, score = extract_auxiliary_targets(response)
+                    ownerships.append(ownership)
+                    scores.append(score)
 
             print(
                 f"analyzed {min(query_batch_start + len(queries), game_count):,}"
@@ -782,7 +808,7 @@ def create_search_dataset(
     finally:
         engine.close()
 
-    return {
+    dataset = {
         "features": np.asarray(features, dtype=np.float16),
         "game_ids": np.asarray(game_ids, dtype=np.int32),
         "policies": np.asarray(policies, dtype=np.float16),
@@ -801,6 +827,10 @@ def create_search_dataset(
         "child_weights": np.asarray(child_weights, dtype=np.float16),
         "values": np.asarray(values, dtype=np.float16),
     }
+    if include_auxiliary_targets:
+        dataset["ownerships"] = np.asarray(ownerships, dtype=np.float16)
+        dataset["scores"] = np.asarray(scores, dtype=np.float16)
+    return dataset
 
 
 def create_argument_parser() -> argparse.ArgumentParser:
@@ -844,6 +874,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
     )
     argument_parser.add_argument("--moka-turns-only", action="store_true")
+    argument_parser.add_argument("--auxiliary-targets", action="store_true")
     argument_parser.add_argument(
         "--rollout-simulations",
         type=int,
@@ -894,6 +925,7 @@ def main() -> None:
         arguments.middle_game_reanalysis,
         arguments.rollout_simulations,
         arguments.moka_turns_only,
+        arguments.auxiliary_targets,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)

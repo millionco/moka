@@ -8,6 +8,7 @@ from go_model.search_generate import (
     convert_parent_value_to_child,
     coordinate_to_move,
     create_analysis_query,
+    extract_auxiliary_targets,
     get_eligible_analysis_turns,
     is_moka_turn,
     move_to_coordinate,
@@ -46,6 +47,32 @@ class SearchGenerationTests(unittest.TestCase):
         self.assertEqual(query["analyzeTurns"], [0, 1, 2, 3])
         self.assertEqual(query["maxVisits"], 32)
         self.assertEqual(query["rules"], KATAGO_SIMPLE_AREA_RULES)
+        self.assertNotIn("includeOwnership", query)
+
+    def test_query_can_request_auxiliary_targets(self) -> None:
+        query = create_analysis_query(
+            7,
+            [0, 1],
+            32,
+            include_auxiliary_targets=True,
+        )
+
+        self.assertTrue(query["includeOwnership"])
+
+    def test_auxiliary_targets_preserve_board_order_and_score(self) -> None:
+        ownership = np.linspace(-1, 1, BOARD_AREA, dtype=np.float32)
+        extracted_ownership, extracted_score = extract_auxiliary_targets(
+            {
+                "ownership": ownership.tolist(),
+                "rootInfo": {"scoreLead": 12.5},
+            }
+        )
+
+        np.testing.assert_allclose(
+            extracted_ownership,
+            ownership.reshape(9, 9),
+        )
+        self.assertEqual(extracted_score, 12.5)
 
     def test_selective_reanalysis_mixes_uniform_and_surprising_turns(self) -> None:
         selected_turns = select_analysis_turns(
