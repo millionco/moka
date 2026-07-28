@@ -10,6 +10,7 @@ from go_model.config import (
 )
 from go_model.symmetry import (
     aggregate_symmetry_policies,
+    aggregate_symmetry_values,
     apply_batch_board_symmetry,
     apply_batch_spatial_symmetry,
     apply_board_symmetry,
@@ -60,6 +61,17 @@ class SymmetryTest(unittest.TestCase):
                 np.asarray([0.5, 0.5], dtype=np.float32),
             )
         )
+
+    def test_trimmed_value_aggregation_suppresses_symmetry_outliers(
+        self,
+    ) -> None:
+        values = np.asarray([-1, 0.4, 0.5, 1], dtype=np.float32)
+
+        arithmetic_value = aggregate_symmetry_values(values, 0)
+        trimmed_value = aggregate_symmetry_values(values, 1)
+
+        self.assertAlmostEqual(arithmetic_value, 0.225)
+        self.assertAlmostEqual(trimmed_value, 0.45)
 
     def test_policy_and_features_transform_together(self) -> None:
         features = np.zeros(

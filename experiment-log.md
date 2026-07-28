@@ -2162,3 +2162,11 @@ On 20 fresh games from opening offset 1,580,000:
 |          1.00 |    7 |    0 |
 
 Every win completed normally. Partial trimming lost one completed game, while a fully trimmed policy only tied the accepted control. No setting advanced to confirmation. The browser remains on the 0.25 geometric consensus blend without trimming.
+
+## 2026-07-28 — Trimmed symmetry values
+
+The accepted geometric policy remained fixed while the root evaluator optionally replaced part of the arithmetic mean of its eight symmetry values with a mean that discarded the highest and lowest values. This changes only Moka's existing root value aggregate, which can affect parent-value FPU; it adds no inference or runtime information.
+
+On 20 fresh games from opening offset 1,590,000, trimmed-value weights 0, 0.25, 0.50, 0.75, and 1.00 all reproduced the same three wins, one cap, Black/White split, pass counts, and capped-position counts. Every win completed normally.
+
+The transform was behaviorally inert across the complete range and did not advance to confirmation. The browser retains arithmetic symmetry-value averaging.

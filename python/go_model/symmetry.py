@@ -81,6 +81,27 @@ def aggregate_symmetry_policies(
     return blended_policy / np.sum(blended_policy)
 
 
+def aggregate_symmetry_values(
+    values: np.ndarray,
+    trimmed_value_weight: float,
+) -> float:
+    if not 0 <= trimmed_value_weight <= 1:
+        raise ValueError("Trimmed value weight must be between zero and one.")
+
+    arithmetic_value = float(np.mean(values))
+
+    if trimmed_value_weight == 0:
+        return arithmetic_value
+
+    if len(values) < 3:
+        raise ValueError("Trimmed value aggregation requires three values.")
+
+    trimmed_value = float(np.mean(np.sort(values)[1:-1]))
+    return (
+        1 - trimmed_value_weight
+    ) * arithmetic_value + trimmed_value_weight * trimmed_value
+
+
 def apply_batch_board_symmetry(
     features: np.ndarray,
     policies: np.ndarray,
