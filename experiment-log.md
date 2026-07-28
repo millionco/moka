@@ -2010,3 +2010,35 @@ Three two-epoch policy-head seeds used learning rate 0.00001, the existing 20,00
 The incumbent scored 60.0% validation and 65.6% test top-move agreement against the Q-derived targets. Seeds 60, 61, and 62 reached 58.6%, 58.6%, and 59.8% validation agreement and 65.0%, 65.0%, and 65.4% test agreement.
 
 Every candidate regressed on both held-out gates. None entered the arena. Direct root-Q targets are now reproducible, but this corpus and frozen-head recipe did not improve action ranking.
+
+## 2026-07-28 — Exact-topology FPU, exploration, and visits
+
+### First-play urgency
+
+FPU was retuned after restoring one-leaf search. On 20 games from opening offset 1,430,000, absolute-zero treatment and reductions 0, 0.1, 0.25, and 0.5 scored three, five, six, seven, and five wins. Their cap counts were zero, two, two, one, and two.
+
+The deployed reduction 0.25 remained the clear joint winner and was retained.
+
+### Exploration
+
+On 20 games from opening offset 1,440,000, exploration coefficients 1.0, 1.5, 2.0, 2.5, and 3.0 scored ten, ten, nine, seven, and seven wins. Their cap counts were two, three, four, three, and three. Coefficient 1.0 was frozen as the smallest joint leader.
+
+On 100 untouched games from offset 1,450,000, deployed 2.0 scored 31 completed wins with eight caps. Candidate 1.0 scored 29 completed wins with six caps. The candidate lost two completed games and was rejected.
+
+### Visit count screen
+
+On 20 games from opening offset 1,460,000, budgets 20, 24, 28, 32, and 40 scored two, five, four, six, and nine wins. Their cap counts were one, zero, zero, zero, and zero. Forty visits was frozen as the clear leader.
+
+### Independent confirmation
+
+Two disjoint 100-game blocks compared deployed 28 visits with the 40-visit candidate:
+
+| Opening offset | 28 visits |   Caps | 40 visits |   Caps | 40-visit cap wins |
+| -------------: | --------: | -----: | --------: | -----: | ----------------: |
+|      1,470,000 |        30 |     10 |        31 |      4 |                 0 |
+|      1,480,000 |        28 |      8 |        36 |      7 |                 1 |
+|      **Total** |    **58** | **18** |    **67** | **11** |             **1** |
+
+After conservatively excluding the cap-awarded result, 40 visits won 66 completed games versus 58 for 28 visits. Caps fell from 18 to 11. Runtime rose from 267.7 to 399.0 seconds across the 200 games.
+
+Forty visits is accepted for the browser. It changes neither model weights nor download size and remains behind the existing interaction-only search gate.
