@@ -2,7 +2,11 @@ import unittest
 
 import numpy as np
 
-from go_model.arena import get_search_simulation_count
+from go_model.arena import (
+    create_argument_parser,
+    get_search_simulation_count,
+    should_resign_selected_pass,
+)
 from go_model.board import GameState, play_move
 from go_model.config import POLICY_MOVE_COUNT
 from go_model.search import (
@@ -31,6 +35,37 @@ class UniformEvaluator:
 
 
 class SearchTest(unittest.TestCase):
+    def test_arena_defaults_match_accepted_search_player(self) -> None:
+        arguments = create_argument_parser().parse_args(
+            ["--checkpoint", "checkpoint.safetensors"],
+        )
+
+        self.assertEqual(arguments.simulations, 64)
+        self.assertEqual(arguments.search_exploration, 2.0)
+        self.assertEqual(arguments.search_fpu_reduction, 0.25)
+        self.assertEqual(arguments.resignation_area_margin, 60.0)
+        self.assertTrue(arguments.root_symmetry_ensemble)
+
+    def test_resignation_requires_hopeless_selected_pass(
+        self,
+    ) -> None:
+        game_state = GameState(
+            board=np.ones((9, 9), dtype=np.int8),
+            next_color=-1,
+            move_count=80,
+            consecutive_pass_count=1,
+        )
+
+        self.assertFalse(
+            should_resign_selected_pass(game_state, 81, 0),
+        )
+        self.assertTrue(
+            should_resign_selected_pass(game_state, 81, 40),
+        )
+        self.assertFalse(
+            should_resign_selected_pass(game_state, 0, 40),
+        )
+
     def test_late_search_simulation_count_only_applies_after_cutoff(self) -> None:
         early_game_state = GameState(move_count=59)
         late_game_state = GameState(move_count=60)
@@ -134,7 +169,11 @@ class SearchTest(unittest.TestCase):
             1: visited_child,
         }
 
-        baseline_child = select_child(parent, exploration=0)
+        baseline_child = select_child(
+            parent,
+            exploration=0,
+            first_play_urgency_reduction=-1,
+        )
         urgency_child = select_child(
             parent,
             exploration=0,

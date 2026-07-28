@@ -2416,3 +2416,94 @@ On 20 fresh games from opening offset 1,790,000:
 |      0.75 to move 88 |    6 |    0 |
 
 Every win completed normally. Every sharpened configuration lost at least two completed games. The cap reduction therefore did not represent a strength improvement, and no schedule advanced to confirmation. Production retains fixed temperature 1.0.
+
+## 2026-07-28 — Cap diagnosis and explicit resignation
+
+### Capped-game traces
+
+The arena gained an opt-in capped-game trace containing the deterministic opening identifier, colors, final area score, repetition count, complete move history, and final board. Replaying the six production caps at opening offset 1,780,000 showed one consistent failure:
+
+- every cap was a Moka loss as White;
+- every final area score was +74 for Black;
+- no position repeated;
+- Moka repeatedly selected pass while KataGo continued filling Black territory.
+
+The failure was not ko cycling. The existing two-pass game ending could not represent resignation, so a hopeless player could pass dozens of times without ending the game.
+
+### Rejected opponent-pass rule
+
+An initial rule accepted an opponent pass when current-board area was sufficiently unfavorable. On the previously measured temperature-0.75 block at offset 1,760,000, margin 20 reduced the candidate from 47 reported wins to 43 while leaving all five caps. It could concede recoverable positions and did not address the actual self-pass pattern. The rule was removed.
+
+### Explicit self-pass resignation
+
+The replacement records an ordinary loss only when all of these conditions hold:
+
+- Moka itself selected pass;
+- at least 20 moves have been played;
+- current-board area is at least a configured margin against Moka.
+
+It uses only the visible board and Moka's own move. It does not query KataGo, inspect future play, alter legal moves, or award a win.
+
+On the known offset-1,760,000 diagnostic block, margins 40 and 60 both preserved all 47 reported outcomes while reducing caps from five to one. Margin 40 recorded five resignations; margin 60 recorded four. The remaining cap was a repetition-heavy game Moka led by ten points, so resignation correctly did not fire. Margin 60 was frozen as the more conservative threshold.
+
+## 2026-07-28 — Root-policy temperature with resignation
+
+### Fresh screen
+
+On 20 fresh games from opening offset 1,820,000:
+
+| Configuration                | Wins | Caps | Resignations |
+| ---------------------------- | ---: | ---: | -----------: |
+| Production, temperature 1.00 |    7 |    2 |            0 |
+| Temperature 1.00, margin 60  |    7 |    0 |            2 |
+| Temperature 0.95, margin 60  |    7 |    0 |            0 |
+| Temperature 0.90, margin 60  |    7 |    0 |            1 |
+| Temperature 0.85, margin 60  |    9 |    0 |            1 |
+| Temperature 0.75, margin 60  |    8 |    0 |            2 |
+
+Temperature 0.85 was frozen as the only two-win screen improvement. Resignation alone preserved all wins and removed both caps.
+
+### Independent confirmation
+
+Two untouched 100-game blocks compared the frozen temperature candidate with production:
+
+| Opening offset | Production wins | Production caps | Candidate wins | Candidate caps | Candidate resignations |
+| -------------: | --------------: | --------------: | -------------: | -------------: | ---------------------: |
+|      1,830,000 |              37 |               2 |             39 |              1 |                      5 |
+|      1,840,000 |              46 |              13 |             44 |              0 |                      8 |
+|      **Total** |          **83** |          **15** |         **83** |          **1** |                 **13** |
+
+Every reported win completed normally. Temperature 0.85 did not improve aggregate completed wins and was rejected as a strength change. The cap reduction established that explicit resignation generalized, but it did not justify attributing strength to the temperature candidate.
+
+## 2026-07-28 — Sixty-four visits with resignation
+
+### Budget screen
+
+The accepted temperature 1.0, value weight 1.25, exploration 2.0, FPU 0.25, geometric consensus 0.25, one-leaf topology, full branching, and margin-60 resignation were held fixed. On 20 fresh games from opening offset 1,850,000:
+
+|                   Visits | Wins | Caps | Resignations |
+| -----------------------: | ---: | ---: | -----------: |
+| 56, resignation disabled |    8 |    0 |            0 |
+|                       56 |    8 |    0 |            0 |
+|                       64 |    9 |    0 |            0 |
+|                       72 |    8 |    0 |            0 |
+|                       80 |    7 |    0 |            0 |
+|                       96 |    4 |    0 |            2 |
+
+Sixty-four visits was frozen as the unique win leader. Larger budgets were weaker rather than merely slower.
+
+### Independent confirmation
+
+Two untouched 100-game blocks compared the frozen candidate with the 56-visit control:
+
+| Opening offset | 56 visits | 56 caps | 64 visits | 64 caps | 64 resignations |
+| -------------: | --------: | ------: | --------: | ------: | --------------: |
+|      1,860,000 |        33 |      10 |        34 |       0 |               8 |
+|      1,870,000 |        36 |       6 |        40 |       0 |              10 |
+|      **Total** |    **69** |  **16** |    **74** |   **0** |          **18** |
+
+Every reported win completed normally. Sixty-four visits added five completed wins and explicit resignation removed all 16 unfinished games. Aggregate runtime rose from 545.5 to 605.7 seconds, about 11%. The model, teacher, legal moves, and payload were unchanged.
+
+The 64-visit, margin-60 configuration is accepted for Moka research. Per user direction, it is not being added to or deployed on the Million website.
+
+The Python arena defaults now reproduce the accepted research player: 64 visits, root symmetry enabled, exploration 2.0, FPU 0.25, value weight 1.25, geometric consensus 0.25, and resignation margin 60. Explicit negative flags remain available for controls. The browser package, model files, and Million website remain unchanged.
