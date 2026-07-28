@@ -2908,3 +2908,40 @@ On 20 fresh exact-INT8 games from opening offset 2,310,000:
 | Seed 112  |    7 |    0 |            0 |
 
 All candidates remained 111,920 bytes. Quantization-aware optimization fixed the float-to-INT8 mismatch as intended, but lower teacher loss and higher search-target agreement still failed to predict game strength. Every candidate is rejected. The accepted checkpoint and artifact remain unchanged, and no website files were touched.
+
+## 2026-07-28 — Transposition-aware search values
+
+### Hypothesis
+
+The evaluator already caches feature-identical positions, but separate tree nodes do not share the value evidence accumulated after reaching the same state through different move orders. Reusing that evidence might spend the accepted 64-visit budget more effectively without adding model evaluations, model bytes, or teacher access during play.
+
+Across eight fresh games, 449 of 15,859 descendant evaluation requests hit an existing state cache entry, a 2.83% reuse rate. This was sufficient to test a bounded shared-value path.
+
+The experimental implementation kept visits and priors local to each parent edge. Only the mean-value evidence was shared by the exact Moka feature-state key: board, next color, ko point, and two recent moves. This prevented another parent's visits from contaminating root move counts. A regression test verified that identical positions shared value evidence while retaining independent edge visits and priors.
+
+### Screen
+
+The exact accepted INT8 artifact, 64 visits, root symmetry, geometric policy blend, exploration, FPU, value weight, full branching, and resignation behavior were fixed. On 20 fresh games from opening offset 2,330,000:
+
+| Shared-value weight | Wins | Caps | Black | White |
+| ------------------: | ---: | ---: | ----: | ----: |
+|                0.00 |    7 |    1 |     2 |     5 |
+|                0.25 |    7 |    1 |     2 |     5 |
+|                0.50 |    7 |    1 |     2 |     5 |
+|                1.00 |    8 |    1 |     2 |     6 |
+
+Full sharing was frozen as the only screen improvement.
+
+### Independent confirmation
+
+Two untouched 100-game blocks compared the frozen candidate with the control on identical openings and colors:
+
+| Opening offset | Control wins | Control caps | Shared-value wins | Shared-value caps |
+| -------------: | -----------: | -----------: | ----------------: | ----------------: |
+|      2,340,000 |           41 |            0 |                41 |                 0 |
+|      2,350,000 |           46 |            0 |                47 |                 0 |
+|      **Total** |       **87** |        **0** |            **88** |             **0** |
+
+Control runtime was 574.5 seconds in aggregate. Shared-value runtime was 624.1 seconds, an 8.6% increase.
+
+The candidate tied one block and added only one game in the other. That effect is too small to establish improved strength and does not justify the runtime cost. Transposition sharing is rejected, and its runtime path was removed. The accepted player, checkpoint, and INT8 artifact are unchanged. No website files were touched.
