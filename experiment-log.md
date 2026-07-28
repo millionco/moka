@@ -3715,3 +3715,22 @@ On 20 fresh games from opening offset 2,900,000:
 The incumbent's cap was a losing game and did not contribute a win. Every Q candidate exactly tied its matched control on wins and colors, and every continuation remained below the incumbent. No candidate advanced.
 
 Current-player searched child-Q supervision at this continuation scale changes exact model bytes but does not improve play. All Q candidates are rejected. The accepted artifact, search, and Million website remain unchanged.
+
+## 2026-07-28 — Conservative deep-critical policy soup
+
+Deep-critical seed 182 previously improved both standalone confirmation blocks, 91 wins to 85, but failed the no-cap gate and regressed in a later composite confirmation. It differs from the accepted exact artifact only in `policy_linear.weight` and `policy_linear.bias`.
+
+To test whether a conservative model soup could retain useful policy corrections while damping unstable decisions, exact-dequantized incumbent and candidate tensors were linearly interpolated at candidate weights 0.25, 0.50, and 0.75. Every blend was requantized, materialized as an exact checkpoint, and exported at 111,920 bytes.
+
+On 20 fresh games from opening offset 2,910,000:
+
+| Candidate | Wins | Black | White | Caps |
+| :-------- | ---: | ----: | ----: | ---: |
+| Incumbent |   14 |     6 |     8 |    0 |
+| 25% blend |   13 |     6 |     7 |    0 |
+| 50% blend |   10 |     5 |     5 |    0 |
+| 75% blend |   10 |     5 |     5 |    0 |
+
+Every blend was weaker than the incumbent, and performance declined as the rejected candidate's contribution increased. No blend advanced to confirmation.
+
+Conservative interpolation does not recover a stable gain from deep-critical seed 182. All blends are rejected. The accepted artifact, search, and Million website remain unchanged.
