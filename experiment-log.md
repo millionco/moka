@@ -2731,3 +2731,55 @@ Two untouched 100-game blocks produced:
 |      **Total** |         **90** |          **0** |       **88** |        **0** |
 
 The candidate improved the second block but regressed by four wins on the first, losing two games in aggregate. It is rejected. The child-target collector remains because the experiment is leakage-free and reproducible, but the accepted checkpoint and INT8 artifact are unchanged.
+
+## 2026-07-28 — Phase-specific PUCT value weight
+
+### Hypothesis
+
+The pointwise and action-relative value heads both failed despite improving their offline targets. The existing value might instead be useful at a different strength relative to the policy prior after the middle game. An opt-in schedule retained value weight 1.25 through move 49 and changed it from move 50 onward without adding evaluations or model bytes.
+
+Regression coverage verifies the cutoff and disabled behavior.
+
+### Screen
+
+On 20 fresh games from opening offset 2,120,000:
+
+| Late value weight | Wins | Caps | Resignations |
+| ----------------: | ---: | ---: | -----------: |
+|     Constant 1.25 |    7 |    0 |            3 |
+|              0.50 |    7 |    0 |            4 |
+|              0.75 |    8 |    0 |            4 |
+|              1.00 |    7 |    0 |            4 |
+|              1.50 |    7 |    0 |            3 |
+|              2.00 |    7 |    0 |            4 |
+
+Late weight 0.75 was frozen as the only screen improvement.
+
+### Independent confirmation
+
+| Opening offset | Constant wins | Constant caps | Late 0.75 wins | Late 0.75 caps |
+| -------------: | ------------: | ------------: | -------------: | -------------: |
+|      2,130,000 |            43 |             0 |             42 |              0 |
+|      2,140,000 |            42 |             1 |             40 |              0 |
+|      **Total** |        **85** |         **1** |         **82** |          **0** |
+
+The schedule removed one unfinished game but lost three completed wins. It is rejected and remains disabled by default. Production research play retains constant value weight 1.25.
+
+## 2026-07-28 — Phase-specific visit allocation
+
+### Hypothesis
+
+Global budgets above 64 visits were weaker, but that result did not isolate the endgame. Keeping 64 visits through move 59 and changing only the late budget tested whether fewer noisy evaluations or greater tactical resolution improved completion.
+
+On 20 fresh games from opening offset 2,150,000:
+
+| Late visits | Wins | Black | White | Caps | Runtime |
+| ----------: | ---: | ----: | ----: | ---: | ------: |
+| Constant 64 |    8 |     4 |     4 |    0 |   64.1s |
+|          32 |    8 |     4 |     4 |    0 |   60.1s |
+|          48 |    8 |     4 |     4 |    0 |   62.0s |
+|          80 |    8 |     4 |     4 |    0 |   66.0s |
+|          96 |    8 |     4 |     4 |    0 |   68.4s |
+|         128 |    8 |     4 |     4 |    0 |   71.6s |
+
+Every schedule tied exactly on wins, colors, caps, and resignations. Thirty-two late visits reduced runtime by about 6%, but speed alone does not satisfy the strength gate. No schedule advanced, and constant 64 visits remain the accepted research default.

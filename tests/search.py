@@ -5,6 +5,7 @@ import numpy as np
 from go_model.arena import (
     create_argument_parser,
     get_search_simulation_count,
+    get_search_value_weight,
     should_resign_selected_pass,
 )
 from go_model.board import GameState, play_move
@@ -108,6 +109,20 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(
             get_search_simulation_count(GameState(move_count=80), 64, 0, 60),
             64,
+        )
+
+    def test_late_search_value_weight_applies_after_cutoff(self) -> None:
+        self.assertEqual(
+            get_search_value_weight(GameState(move_count=49), 1.25, 0.75, 50),
+            1.25,
+        )
+        self.assertEqual(
+            get_search_value_weight(GameState(move_count=50), 1.25, 0.75, 50),
+            0.75,
+        )
+        self.assertEqual(
+            get_search_value_weight(GameState(move_count=80), 1.25, 0, 50),
+            1.25,
         )
 
     def test_q_normalization_can_overcome_small_raw_value_scale(self) -> None:

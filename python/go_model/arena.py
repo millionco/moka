@@ -31,6 +31,8 @@ from go_model.config import (
     SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
     SEARCH_LATE_SIMULATION_COUNT,
     SEARCH_LATE_SIMULATION_START_MOVE_COUNT,
+    SEARCH_LATE_VALUE_START_MOVE_COUNT,
+    SEARCH_LATE_VALUE_WEIGHT,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
@@ -103,6 +105,21 @@ def get_search_simulation_count(
         return late_simulation_count
 
     return simulation_count
+
+
+def get_search_value_weight(
+    game_state: GameState,
+    value_weight: float,
+    late_value_weight: float,
+    late_value_start_move_count: int,
+) -> float:
+    if (
+        late_value_weight > 0
+        and game_state.move_count >= late_value_start_move_count
+    ):
+        return late_value_weight
+
+    return value_weight
 
 
 def should_accept_opponent_pass(
@@ -288,6 +305,10 @@ def run_arena(
     resignation_area_margin_points: float = (
         SEARCH_RESIGNATION_AREA_MARGIN_POINTS
     ),
+    late_search_value_weight: float = SEARCH_LATE_VALUE_WEIGHT,
+    late_search_value_start_move_count: int = (
+        SEARCH_LATE_VALUE_START_MOVE_COUNT
+    ),
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -466,6 +487,13 @@ def run_arena(
                 late_simulation_count,
                 late_simulation_start_move_count,
             )
+            if search_session is not None:
+                search_session.value_weight = get_search_value_weight(
+                    game_state,
+                    search_value_weight,
+                    late_search_value_weight,
+                    late_search_value_start_move_count,
+                )
             move = (
                 select_moka_move(
                     model,
@@ -603,6 +631,16 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--search-value-weight",
         type=float,
         default=SEARCH_PUCT_VALUE_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--late-search-value-weight",
+        type=float,
+        default=SEARCH_LATE_VALUE_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--late-search-value-start-move",
+        type=int,
+        default=SEARCH_LATE_VALUE_START_MOVE_COUNT,
     )
     argument_parser.add_argument(
         "--search-q-normalization-weight",
@@ -813,6 +851,8 @@ def main() -> None:
         arguments.root_symmetry_top_move_vote_policy_weight,
         arguments.report_capped_games,
         arguments.resignation_area_margin,
+        arguments.late_search_value_weight,
+        arguments.late_search_value_start_move,
     )
 
 
