@@ -129,6 +129,20 @@ def aggregate_symmetry_values(
     ) * arithmetic_value + trimmed_value_weight * trimmed_value
 
 
+def resolve_symmetry_rank_policy_weight(
+    rank_policy_weight: float,
+    rank_policy_end_move_count: int,
+    move_count: int,
+) -> float:
+    if (
+        rank_policy_end_move_count > 0
+        and move_count >= rank_policy_end_move_count
+    ):
+        return 0
+
+    return rank_policy_weight
+
+
 def apply_batch_board_symmetry(
     features: np.ndarray,
     policies: np.ndarray,

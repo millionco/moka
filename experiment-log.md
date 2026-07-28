@@ -2197,3 +2197,30 @@ Every win completed normally. Weight 0.50 was frozen as the smallest joint scree
 On 100 untouched games from opening offset 1,610,000, the accepted geometric control scored 27 wins with eight caps. The frozen rank candidate scored 32 wins with ten caps. Every win completed normally; the control took 270.4 seconds and the candidate took 273.4 seconds.
 
 Rank consensus added five completed wins but also two unfinished games. It failed the predeclared no-cap-regression gate after the first confirmation block and was rejected without retuning or a second block. The browser remains unchanged.
+
+## 2026-07-28 — Phase-limited rank consensus
+
+### Hypothesis
+
+Full-game rank consensus added wins and caps. A deterministic schedule therefore used the frozen 0.50 top-eight rank blend only before a move-count cutoff, then returned to the accepted geometric policy. The hypothesis was that earlier rank agreement contained the useful signal while its coarse late-game distribution caused loops.
+
+### Screen
+
+On 20 fresh games from opening offset 1,620,000:
+
+| Rank schedule | Wins | Caps |
+| ------------- | ---: | ---: |
+| Disabled      |    5 |    2 |
+| Full game     |    6 |    1 |
+| End at 24     |    6 |    2 |
+| End at 40     |    8 |    3 |
+| End at 56     |    6 |    1 |
+| End at 72     |    6 |    1 |
+
+Every win completed normally. The move-40 schedule added the most wins but regressed caps and was rejected. Move 56 was frozen as the earliest schedule that added a completed win while removing a cap.
+
+### Fresh confirmation
+
+On 100 untouched games from opening offset 1,630,000, the geometric control scored 34 wins with seven caps. The frozen move-56 schedule scored 33 wins with six caps. Every win completed normally; the control took 278.2 seconds and the candidate took 282.6 seconds.
+
+Ending rank consensus before the late game removed one cap but also lost one completed game. It failed the strength gate after the first confirmation block and was rejected without testing another cutoff on the confirmation openings. Production remains unchanged.

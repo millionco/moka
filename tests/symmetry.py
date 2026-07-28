@@ -15,6 +15,7 @@ from go_model.symmetry import (
     apply_batch_spatial_symmetry,
     apply_board_symmetry,
     invert_policy_symmetry,
+    resolve_symmetry_rank_policy_weight,
 )
 
 
@@ -87,6 +88,15 @@ class SymmetryTest(unittest.TestCase):
 
         self.assertGreater(arithmetic_policy[0], arithmetic_policy[1])
         self.assertGreater(rank_policy[1], rank_policy[0])
+
+    def test_rank_policy_can_end_at_a_move_cutoff(self) -> None:
+        early_weight = resolve_symmetry_rank_policy_weight(0.5, 40, 39)
+        late_weight = resolve_symmetry_rank_policy_weight(0.5, 40, 40)
+        disabled_cutoff_weight = resolve_symmetry_rank_policy_weight(0.5, 0, 80)
+
+        self.assertEqual(early_weight, 0.5)
+        self.assertEqual(late_weight, 0)
+        self.assertEqual(disabled_cutoff_weight, 0.5)
 
     def test_policy_and_features_transform_together(self) -> None:
         features = np.zeros(
