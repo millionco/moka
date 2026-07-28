@@ -2,7 +2,7 @@
 
 A cute Go-playing model.
 
-Moka v1 is a 104,129-parameter policy and value network for 9×9 Go. Its 112 KB INT8 weights run entirely in the browser. With 512-visit search, it wins 52 of 100 games against KataGo b6c96.
+Moka v1 is a 104,129-parameter policy and value network for 9×9 Go. Its 112 KB INT8 weights run entirely in the browser. With 64-visit search, it won 91 of 200 fresh games against KataGo b6c96.
 
 Moka was distilled from KataGo b6c96 using teacher games and positions reached by Moka’s own rollouts.
 

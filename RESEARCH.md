@@ -11,7 +11,7 @@ The deployment target is not ONNX. The browser artifact uses per-output-channel 
 - four 32-channel residual blocks
 - 82-way policy head, including pass
 - current-player value head
-- 109,569 parameters
+- 104,129 parameters
 - hard export budget: 200 KB
 
 MLX trains the float model on Apple Silicon. KataGo runs through native ONNX Runtime only while generating distillation targets. Export quantizes each convolution and linear output channel independently.

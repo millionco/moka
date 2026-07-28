@@ -3,7 +3,10 @@ from pathlib import Path
 
 import numpy as np
 
-from go_model.arena import create_opening_game_state
+from go_model.arena import (
+    create_opening_game_state,
+    should_resign_selected_pass,
+)
 from go_model.board import get_legal_moves, is_game_over, play_move
 from go_model.collect import select_greedy_rollout_move
 from go_model.config import (
@@ -16,6 +19,7 @@ from go_model.config import (
     SEARCH_PUCT_EXPLORATION,
     SEARCH_Q_POLICY_BLEND,
     SEARCH_Q_POLICY_TEMPERATURE,
+    SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
 )
 from go_model.features import encode_moka_features
 from go_model.model import create_moka_network
@@ -64,6 +68,9 @@ def collect_search_distillation_dataset(
     search_exploration: float = SEARCH_PUCT_EXPLORATION,
     search_first_play_urgency_reduction: float = (
         SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+    ),
+    resignation_area_margin_points: float = (
+        SEARCH_RESIGNATION_AREA_MARGIN_POINTS
     ),
 ) -> dict[str, np.ndarray]:
     if not 0 <= search_policy_blend <= 1:
@@ -166,6 +173,14 @@ def collect_search_distillation_dataset(
                 )
                 search_q_values.append(root_q_values)
                 search_q_weights.append(root_q_weights)
+
+            if is_moka_turn and should_resign_selected_pass(
+                game_state,
+                move,
+                resignation_area_margin_points,
+            ):
+                break
+
             next_state = play_move(game_state, move)
 
             if next_state is None:
@@ -270,6 +285,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
     )
+    argument_parser.add_argument(
+        "--resignation-area-margin",
+        type=float,
+        default=SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
+    )
     return argument_parser
 
 
@@ -291,6 +311,7 @@ def main() -> None:
         arguments.search_q_policy_temperature,
         arguments.search_exploration,
         arguments.search_fpu_reduction,
+        arguments.resignation_area_margin,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)

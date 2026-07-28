@@ -2507,3 +2507,95 @@ Every reported win completed normally. Sixty-four visits added five completed wi
 The 64-visit, margin-60 configuration is accepted for Moka research. Per user direction, it is not being added to or deployed on the Million website.
 
 The Python arena defaults now reproduce the accepted research player: 64 visits, root symmetry enabled, exploration 2.0, FPU 0.25, value weight 1.25, geometric consensus 0.25, and resignation margin 60. Explicit negative flags remain available for controls. The browser package, model files, and Million website remain unchanged.
+
+## 2026-07-28 — Full-network distillation from the accepted search player
+
+### Hypothesis
+
+Earlier 28-visit search distillation improved held-out policy loss but regressed in the arena when only the policy head adapted. The accepted 64-visit player supplies a stronger target. A low-learning-rate update to the complete 104,129-parameter network may transfer some of that search improvement into the checkpoint while a policy-preservation penalty and the existing browser on-policy replay set limit forgetting.
+
+KataGo remains an offline teacher for target values and the opponent in evaluation. It is never queried while Moka selects an arena move.
+
+### Fresh trajectory corpus
+
+The accepted checkpoint generated 128 teacher-opponent games from opening offset 1,900,000. Collection used the accepted 64-visit search, root symmetry, exploration 2.0, FPU 0.25, value weight 1.25, geometric policy blend 0.25, and margin-60 resignation. Only Moka decision positions were retained.
+
+The resulting corpus contained 4,246 positions. Each policy target blended 75% of the 64-visit distribution with 25% of the legal symmetry-averaged root policy. Teacher values supplied the value targets. Complete games were assigned to train, validation, and test buckets before training.
+
+Corpus SHA-256:
+
+```text
+9b85b38a9154f86c40b58441d24a0558cc9c8aa892893dcaaaceb141a4b227c5
+```
+
+The collector now applies the same explicit self-pass resignation rule as the arena. The selected pass is retained as a training decision, then a hopeless trajectory ends rather than accumulating artificial pass/fill positions.
+
+### Frozen training recipe
+
+Three seeds used the same predeclared recipe:
+
+- one epoch;
+- batch size 128;
+- learning rate 0.000005;
+- full nested network adaptation;
+- policy-preservation weight 0.25 against the incumbent;
+- 20,000 existing browser on-policy positions as training-only replay;
+- validation-loss checkpoint selection.
+
+No seed-specific hyperparameter was changed after observing its result.
+
+### Held-out gate
+
+| Checkpoint | Search test loss | Search top move | Search value MAE | Replay test loss | Replay top move | Replay value MAE |
+| ---------- | ---------------: | --------------: | ---------------: | ---------------: | --------------: | ---------------: |
+| Incumbent  |           1.8717 |           66.7% |           0.3557 |           2.6044 |           54.5% |           0.2494 |
+| Seed 71    |           1.8507 |           68.3% |           0.3024 |           2.5121 |           55.0% |           0.2281 |
+| Seed 72    |           1.8459 |           67.8% |           0.2874 |           2.5143 |           55.0% |           0.2340 |
+| Seed 73    |           1.8492 |           68.0% |           0.2990 |           2.5108 |           54.7% |           0.2288 |
+
+All three candidates passed the offline gate.
+
+### Arena screen
+
+The incumbent and candidates played the same 20 fresh games from opening offset 1,910,000. The arena used the accepted 64-visit player and margin-60 resignation.
+
+| Checkpoint | Wins | Caps | Resignations |
+| ---------- | ---: | ---: | -----------: |
+| Incumbent  |    6 |    0 |            3 |
+| Seed 71    |    9 |    0 |            1 |
+| Seed 72    |    6 |    0 |            1 |
+| Seed 73    |    8 |    0 |            1 |
+
+Seed 71 was frozen as the only three-win screen improvement. Seeds 72 and 73 were rejected without confirmation.
+
+### Independent confirmation
+
+Two untouched 100-game blocks compared the frozen seed-71 candidate with the incumbent on identical openings and colors:
+
+| Opening offset | Incumbent wins | Incumbent caps | Candidate wins | Candidate caps | Candidate resignations |
+| -------------: | -------------: | -------------: | -------------: | -------------: | ---------------------: |
+|      1,920,000 |             42 |              0 |             43 |              0 |                      4 |
+|      1,930,000 |             35 |              1 |             41 |              0 |                      7 |
+|      **Total** |         **77** |          **1** |         **84** |          **0** |                 **11** |
+
+The candidate improved both disjoint blocks, added seven completed wins in aggregate, and removed the incumbent's single unfinished game. It is accepted as the new Moka checkpoint.
+
+### INT8 deployment-format gate
+
+The exact exported INT8 tensors were dequantized into the Python evaluator so the deployable artifact could be compared with the float checkpoint and previous INT8 artifact.
+
+On the untouched search-corpus test split, INT8 quantization preserved 68.3% top-move agreement exactly. Loss changed from 1.8507 to 1.8531, and value MAE changed from 0.3024 to 0.2933.
+
+A 20-game sanity block at offset 1,940,000 scored nine wins for float and eight for INT8, both with zero caps. Because that one-game difference was inconclusive, two new 100-game blocks directly compared the previous and candidate INT8 artifacts:
+
+| Opening offset | Previous INT8 wins | Previous caps | Candidate INT8 wins | Candidate caps |
+| -------------: | -----------------: | ------------: | ------------------: | -------------: |
+|      1,950,000 |                 40 |             0 |                  43 |              0 |
+|      1,960,000 |                 46 |             0 |                  48 |              0 |
+|      **Total** |             **86** |         **0** |              **91** |          **0** |
+
+The exact candidate artifact improved both quantized blocks, adding five wins without a cap regression. It passes the deployment-format gate.
+
+The network remains 104,129 parameters. Its INT8 browser artifact remains 111,920 bytes. The accepted float checkpoint has SHA-256 `8640f8687c95d17bd938ed8b732270a54faa9fc0f838760209f2932761015004`; the exported weights have SHA-256 `80e9188841a23e9f83bbb14cc8faa92f23cf2c61e86ec12e32289aafc34329d4`.
+
+Only the Moka repository artifact is updated. The Million website is intentionally unchanged.
