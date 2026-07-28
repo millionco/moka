@@ -37,6 +37,7 @@ from go_model.config import (
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
+    SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
     SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
 )
 from go_model.features import (
@@ -224,6 +225,9 @@ def run_arena(
     use_q_value_normalization_at_root_only: bool = (
         SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
     ),
+    root_symmetry_geometric_policy_weight: float = (
+        SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
+    ),
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -247,7 +251,13 @@ def run_arena(
         use_descendant_symmetry_pair,
     )
     root_evaluator = (
-        MokaEvaluator(model, use_symmetry_ensemble=True)
+        MokaEvaluator(
+            model,
+            use_symmetry_ensemble=True,
+            symmetry_geometric_policy_weight=(
+                root_symmetry_geometric_policy_weight
+            ),
+        )
         if use_root_symmetry_ensemble
         else None
     )
@@ -522,6 +532,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
     )
     argument_parser.add_argument(
+        "--root-symmetry-geometric-policy-weight",
+        type=float,
+        default=SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
+    )
+    argument_parser.add_argument(
         "--root-branches",
         type=int,
         default=SEARCH_ROOT_BRANCH_COUNT,
@@ -605,6 +620,7 @@ def main() -> None:
         arguments.late_simulation_start_move,
         arguments.search_q_normalization_weight,
         arguments.search_q_normalization_root_only,
+        arguments.root_symmetry_geometric_policy_weight,
     )
 
 

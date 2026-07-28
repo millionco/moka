@@ -2110,3 +2110,39 @@ The 0.50 all-node blend was frozen as the only large screen gain. It split six B
 On 100 untouched games from opening offset 1,540,000, the disabled control scored 45 wins with four caps. The frozen 0.50 all-node candidate scored 36 wins with ten caps. Every win completed normally.
 
 Sibling-Q normalization lost nine completed games and added six caps. It was rejected after the first confirmation block and was never added to the browser.
+
+## 2026-07-28 — Geometric root-symmetry consensus
+
+### Method
+
+The deployed root evaluator arithmetically averaged the eight aligned symmetry policies. The candidate also computed their normalized geometric mean, then blended 25% geometric consensus with 75% arithmetic probability. This suppresses moves supported by only a few orientations while retaining the calibrated arithmetic distribution.
+
+The model, value average, legal moves, 56-visit budget, one-leaf topology, exploration 2.0, FPU 0.25, full branching, and final maximum-visit selection were unchanged. The candidate uses only Moka's eight existing root evaluations and adds no model query, teacher information, rule heuristic, or payload tensor.
+
+### Screen
+
+On 20 fresh games from opening offset 1,550,000:
+
+| Geometric blend | Wins | Caps |
+| --------------: | ---: | ---: |
+|            0.00 |    2 |    2 |
+|            0.25 |    3 |    0 |
+|            0.50 |    3 |    1 |
+|            0.75 |    3 |    1 |
+|            1.00 |    3 |    1 |
+
+No setting received a cap-awarded win. The 0.25 blend was frozen because it matched the best completed-win result with the fewest caps and made the smallest change to the incumbent distribution.
+
+### Independent confirmation
+
+Two disjoint 100-game blocks compared the frozen blend with arithmetic averaging:
+
+| Opening offset | Arithmetic wins | Arithmetic caps | Geometric wins | Geometric caps |
+| -------------: | --------------: | --------------: | -------------: | -------------: |
+|      1,560,000 |              24 |               6 |             27 |              4 |
+|      1,570,000 |              32 |               7 |             31 |              6 |
+|      **Total** |          **56** |          **13** |         **58** |         **10** |
+
+Every win completed normally. The arithmetic runs took 269.9 and 264.7 seconds; the geometric runs took 263.7 and 264.0 seconds. The candidate added two completed wins, removed three caps, and introduced no measurable runtime cost across the 200-game confirmation.
+
+The 0.25 geometric consensus blend is accepted for the browser.

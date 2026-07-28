@@ -38,6 +38,32 @@ def invert_policy_symmetry(
     return inverted_policy
 
 
+def aggregate_symmetry_policies(
+    policies: list[np.ndarray],
+    geometric_policy_weight: float,
+) -> np.ndarray:
+    if not 0 <= geometric_policy_weight <= 1:
+        raise ValueError("Geometric policy weight must be between zero and one.")
+
+    policy_array = np.asarray(policies, dtype=np.float32)
+    arithmetic_policy = np.mean(policy_array, axis=0)
+
+    if geometric_policy_weight == 0:
+        return arithmetic_policy
+
+    mean_log_policy = np.mean(
+        np.log(np.maximum(policy_array, np.finfo(np.float32).tiny)),
+        axis=0,
+    )
+    geometric_policy = np.exp(mean_log_policy - np.max(mean_log_policy))
+    geometric_policy /= np.sum(geometric_policy)
+    blended_policy = (
+        (1 - geometric_policy_weight) * arithmetic_policy
+        + geometric_policy_weight * geometric_policy
+    )
+    return blended_policy / np.sum(blended_policy)
+
+
 def apply_batch_board_symmetry(
     features: np.ndarray,
     policies: np.ndarray,

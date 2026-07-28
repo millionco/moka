@@ -9,6 +9,7 @@ from go_model.config import (
     INPUT_PLANE_COUNT,
 )
 from go_model.symmetry import (
+    aggregate_symmetry_policies,
     apply_batch_board_symmetry,
     apply_batch_spatial_symmetry,
     apply_board_symmetry,
@@ -17,6 +18,29 @@ from go_model.symmetry import (
 
 
 class SymmetryTest(unittest.TestCase):
+    def test_geometric_policy_aggregation_rewards_symmetry_consensus(
+        self,
+    ) -> None:
+        policies = [
+            np.asarray([0.9, 0.1], dtype=np.float32),
+            np.asarray([0.01, 0.99], dtype=np.float32),
+        ]
+
+        arithmetic_policy = aggregate_symmetry_policies(policies, 0)
+        geometric_policy = aggregate_symmetry_policies(policies, 1)
+
+        self.assertAlmostEqual(float(np.sum(arithmetic_policy)), 1)
+        self.assertAlmostEqual(float(np.sum(geometric_policy)), 1)
+        self.assertLess(geometric_policy[0], arithmetic_policy[0])
+        self.assertGreater(geometric_policy[1], arithmetic_policy[1])
+
+    def test_geometric_policy_aggregation_rejects_invalid_weight(self) -> None:
+        with self.assertRaises(ValueError):
+            aggregate_symmetry_policies(
+                [np.asarray([0.5, 0.5], dtype=np.float32)],
+                1.1,
+            )
+
     def test_policy_and_features_transform_together(self) -> None:
         features = np.zeros(
             (BOARD_SIZE, BOARD_SIZE, INPUT_PLANE_COUNT),

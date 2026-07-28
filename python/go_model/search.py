@@ -36,6 +36,7 @@ from go_model.config import (
     SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
+    SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_SEQUENTIAL_HALVING_REDUCTION_FACTOR,
     SEARCH_SIMULATION_BATCH_SIZE,
@@ -43,7 +44,11 @@ from go_model.config import (
 )
 from go_model.features import encode_moka_features
 from go_model.model import MokaNetwork
-from go_model.symmetry import apply_board_symmetry, invert_policy_symmetry
+from go_model.symmetry import (
+    aggregate_symmetry_policies,
+    apply_board_symmetry,
+    invert_policy_symmetry,
+)
 
 
 @dataclass
@@ -67,12 +72,18 @@ class MokaEvaluator:
         symmetry_rotation_count: int = 0,
         should_flip_symmetry: bool = False,
         use_symmetry_pair: bool = False,
+        symmetry_geometric_policy_weight: float = (
+            SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
+        ),
     ) -> None:
         self.model = model
         self.use_symmetry_ensemble = use_symmetry_ensemble
         self.symmetry_rotation_count = symmetry_rotation_count
         self.should_flip_symmetry = should_flip_symmetry
         self.use_symmetry_pair = use_symmetry_pair
+        self.symmetry_geometric_policy_weight = (
+            symmetry_geometric_policy_weight
+        )
         self.cache: dict[
             tuple[bytes, int, int, tuple[int, ...]],
             tuple[np.ndarray, float],
@@ -201,7 +212,10 @@ class MokaEvaluator:
                         )
                     ]
                     self.cache[self.get_cache_key(game_state)] = (
-                        np.mean(aligned_policies, axis=0),
+                        aggregate_symmetry_policies(
+                            aligned_policies,
+                            self.symmetry_geometric_policy_weight,
+                        ),
                         float(
                             np.mean(
                                 value_array[symmetry_start:symmetry_end]
