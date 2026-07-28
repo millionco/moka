@@ -3503,3 +3503,49 @@ Two disjoint 100-game blocks compared the frozen candidate with production:
 Production's cap was awarded to Moka by the final area score. Excluding that award leaves 80 normally completed production wins, still seven more than the candidate. The 2.5 candidate regressed on both blocks and is rejected.
 
 Moka retains exploration 2.0 and value weight 1.25. The accepted 0.125 geometric blend, model bytes, and Million website remain unchanged.
+
+## 2026-07-28 — Post-consensus FPU and temperature retune
+
+### First-play urgency
+
+The exact accepted artifact, 64 visits, geometric consensus 0.125, exploration 2.0, value weight 1.25, full branching, and maximum-visit selection were fixed. On 20 fresh games from opening offset 2,780,000:
+
+| FPU reduction | Wins | Black | White | Caps |
+| ------------: | ---: | ----: | ----: | ---: |
+|          0.00 |    7 |     4 |     3 |    0 |
+|          0.10 |    9 |     5 |     4 |    0 |
+|          0.20 |    8 |     4 |     4 |    0 |
+|          0.25 |    7 |     2 |     5 |    0 |
+|          0.30 |    9 |     4 |     5 |    0 |
+|          0.40 |    6 |     1 |     5 |    0 |
+
+Reductions 0.10 and 0.30 tied. Neither advanced because selecting between tied siblings after observing the screen would add selection bias. Production retains FPU reduction 0.25.
+
+### Root-policy temperature screen
+
+A narrow calibration screen held every accepted setting fixed and varied only the symmetry-aggregated root-policy temperature. On 20 fresh games from opening offset 2,790,000:
+
+| Temperature | Wins | Black | White | Caps |
+| ----------: | ---: | ----: | ----: | ---: |
+|        0.85 |    4 |     3 |     1 |    0 |
+|        0.90 |    4 |     2 |     2 |    0 |
+|        0.95 |    7 |     4 |     3 |    0 |
+|        1.00 |    7 |     4 |     3 |    0 |
+|        1.05 |    9 |     5 |     4 |    0 |
+|        1.10 |    7 |     4 |     3 |    0 |
+
+Temperature 1.05 was frozen as the unique screen leader.
+
+### Temperature confirmation
+
+Two disjoint 100-game blocks compared the frozen candidate with production:
+
+| Opening offset | Production wins | Candidate wins | Production caps | Candidate caps |
+| -------------: | --------------: | -------------: | --------------: | -------------: |
+|      2,800,000 |              33 |             27 |               0 |              0 |
+|      2,810,000 |              39 |             37 |               0 |              1 |
+|      **Total** |          **72** |         **64** |           **0** |          **1** |
+
+The candidate regressed on both blocks, lost eight completed games, and introduced one losing move cap. Temperature 1.05 is rejected.
+
+Moka retains root-policy temperature 1.0 and FPU reduction 0.25. The accepted search, model artifact, and Million website remain unchanged.
