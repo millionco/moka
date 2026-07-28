@@ -2599,3 +2599,52 @@ The exact candidate artifact improved both quantized blocks, adding five wins wi
 The network remains 104,129 parameters. Its INT8 browser artifact remains 111,920 bytes. The accepted float checkpoint has SHA-256 `8640f8687c95d17bd938ed8b732270a54faa9fc0f838760209f2932761015004`; the exported weights have SHA-256 `80e9188841a23e9f83bbb14cc8faa92f23cf2c61e86ec12e32289aafc34329d4`.
 
 Only the Moka repository artifact is updated. The Million website is intentionally unchanged.
+
+## 2026-07-28 — Repeated full-network search distillation
+
+### Hypothesis
+
+A second on-policy distillation round from the newly accepted checkpoint might compound the first-round gain by exposing the model to positions created by its changed policy.
+
+### Corpus and frozen recipe
+
+The accepted checkpoint generated 128 new teacher-opponent games from opening offset 2,000,000 with the same 64-visit collection settings. The corpus contained 4,491 Moka decision positions and had SHA-256 `0739683eef886401a25b7f0cc9a8029b43680939bf192f54df3cc5d4e97713eb`.
+
+Seeds 81, 82, and 83 used the accepted one-epoch, 0.000005-learning-rate, full-network recipe. The accepted checkpoint supplied the preservation reference. Both the first-round search corpus and the original 20,000-position browser on-policy corpus were training-only replay.
+
+All candidates reduced held-out loss on the new and first-round search corpora without materially regressing the replay set. On the new corpus, incumbent test loss was 2.0614 and candidate losses were 2.0117, 2.0148, and 2.0074.
+
+### Arena screen
+
+On 20 fresh games from opening offset 2,010,000:
+
+| Checkpoint | Wins | Caps | Resignations |
+| ---------- | ---: | ---: | -----------: |
+| Incumbent  |   11 |    0 |            2 |
+| Seed 81    |   10 |    0 |            2 |
+| Seed 82    |    8 |    0 |            1 |
+| Seed 83    |   10 |    0 |            1 |
+
+No candidate matched the incumbent's wins. The entire round is rejected without confirmation. Lower distillation loss did not compound arena strength, so further seeds of the same recipe are not justified.
+
+## 2026-07-28 — Conservative round-two interpolation
+
+### Hypothesis
+
+Round-two seed 83 improved policy loss and value MAE but lost one game in its screen. Linear interpolation might retain the accepted checkpoint's decisions while importing a smaller part of the candidate's value improvement.
+
+Fixed 25%, 50%, and 75% candidate-weight blends were created before a new screen. On the round-two test games, their value MAE improved monotonically from the incumbent's 0.4805 to 0.4712, 0.4625, and 0.4530.
+
+### Screen and confirmation
+
+On 20 fresh games from opening offset 2,020,000, the incumbent scored 12 wins. The 25%, 50%, and 75% blends scored 13, 12, and 10. Every player had zero caps. The 25% blend was frozen as the only screen improvement.
+
+Two untouched 100-game blocks produced:
+
+| Opening offset | Incumbent wins | Incumbent caps | Blend wins | Blend caps |
+| -------------: | -------------: | -------------: | ---------: | ---------: |
+|      2,030,000 |             38 |              0 |         40 |          0 |
+|      2,040,000 |             41 |              0 |         34 |          0 |
+|      **Total** |         **79** |          **0** |     **74** |      **0** |
+
+The first-block gain reversed on the second block. The blend lost five games in aggregate and is rejected. Neither a second full distillation step nor partial interpolation compounds the accepted first-round checkpoint.
