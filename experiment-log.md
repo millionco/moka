@@ -3347,4 +3347,31 @@ The first two untouched blocks left the candidate ahead by only three games and 
 
 The screen and second-block gains did not generalize. The adjudication reversed the close lead, and the frozen candidate lost six games over 300. It is rejected.
 
-Selective b6 regret successfully enriched consequential b18 mistakes, policy-only QAT preserved exact deployment constraints, and critical targets improved exact held-out loss. None proved a strength gain. The accepted checkpoint, exact 111,920-byte INT8 artifact, runtime search, and Million website remain unchanged.
+Selective b6 regret successfully enriched consequential b18 mistakes, policy-only QAT preserved exact deployment constraints, and critical targets improved exact held-out loss. The frozen screen leader did not prove a strength gain, so production remained unchanged pending separate confirmation of the already-frozen conservative runner-up.
+
+## 2026-07-28 — Conservative critical-QAT confirmation
+
+The critical-QAT screen also produced a more conservative runner-up: eightfold critical replay at learning rate 0.000020 scored 10–7 against the incumbent. It was frozen in the original screen and retained without retraining, interpolation, or re-export.
+
+Its exact INT8 binary has SHA-256 `5d38b3d3f88582212065e6d2aee7b5d638c13e3c4ccaf9e1cab1cd341f757714`. It is 111,920 bytes and differs from the previous artifact only in `policy_linear.weight` and `policy_linear.bias`.
+
+Two fresh 100-game blocks tied in aggregate. The candidate removed both of the incumbent's losing move caps:
+
+| Opening offset | Incumbent wins | Candidate wins | Incumbent caps | Candidate caps |
+| -------------: | -------------: | -------------: | -------------: | -------------: |
+|      2,660,000 |             34 |             35 |              1 |              0 |
+|      2,670,000 |             42 |             41 |              1 |              0 |
+|      **Total** |         **76** |         **76** |          **2** |          **0** |
+
+The predeclared single adjudication block required a strict aggregate win advantage rather than cap reduction alone:
+
+| Opening offset | Incumbent wins | Candidate wins | Incumbent caps | Candidate caps |
+| -------------: | -------------: | -------------: | -------------: | -------------: |
+|      2,680,000 |             37 |             41 |              0 |              0 |
+|  **300 total** |        **113** |        **117** |          **2** |          **0** |
+
+The candidate finishes four completed wins ahead across 300 paired games and removes both unfinished losses. It passes the exact-artifact promotion gate.
+
+The accepted float shadow checkpoint now has SHA-256 `1ee7771f0cc68e41b22e6a05a2384338ec4d3a3763714244a6103d171abecc0a`. Its exact-dequantized checkpoint has SHA-256 `040fae5ff09762db03913e70fae1f5260d4746f5c390c2e36382b3d46468ec1e`. The accepted browser artifact has SHA-256 `5d38b3d3f88582212065e6d2aee7b5d638c13e3c4ccaf9e1cab1cd341f757714`.
+
+The architecture remains 104,129 parameters, the browser artifact remains 111,920 bytes, and the accepted runtime search remains 64 visits. Only the Moka repository artifact is updated. The Million website remains untouched.

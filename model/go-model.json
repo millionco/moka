@@ -12,7 +12,7 @@
     "valueChannelCount": 2
   },
   "format": "million-go-int8",
-  "sha256": "80e9188841a23e9f83bbb14cc8faa92f23cf2c61e86ec12e32289aafc34329d4",
+  "sha256": "5d38b3d3f88582212065e6d2aee7b5d638c13e3c4ccaf9e1cab1cd341f757714",
   "tensors": {
     "policy.convolution.bias": {
       "dataOffset": 79120,
