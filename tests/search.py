@@ -9,6 +9,7 @@ from go_model.search import (
     SearchNode,
     expand_node_with_evaluation,
     run_search_simulations,
+    select_child,
 )
 
 
@@ -52,6 +53,63 @@ class SearchTest(unittest.TestCase):
 
         self.assertIs(aligned_root, second_child)
 
+    def test_first_play_urgency_uses_parent_value_for_unvisited_child(
+        self,
+    ) -> None:
+        parent = SearchNode(GameState(), 1, visit_count=4, value_sum=3)
+        unvisited_child = SearchNode(GameState(), 0.1)
+        visited_child = SearchNode(
+            GameState(),
+            0.9,
+            visit_count=1,
+            value_sum=-0.4,
+        )
+        parent.children = {
+            0: unvisited_child,
+            1: visited_child,
+        }
+
+        baseline_child = select_child(parent, exploration=0)
+        urgency_child = select_child(
+            parent,
+            exploration=0,
+            first_play_urgency_reduction=0.1,
+        )
+
+        self.assertIs(baseline_child, visited_child)
+        self.assertIs(urgency_child, unvisited_child)
+
+    def test_first_play_urgency_can_scale_reduction_by_visited_prior(
+        self,
+    ) -> None:
+        parent = SearchNode(GameState(), 1, visit_count=4, value_sum=2)
+        unvisited_child = SearchNode(GameState(), 0.96)
+        visited_child = SearchNode(
+            GameState(),
+            0.04,
+            visit_count=1,
+            value_sum=-0.3,
+        )
+        parent.children = {
+            0: unvisited_child,
+            1: visited_child,
+        }
+
+        fixed_reduction_child = select_child(
+            parent,
+            exploration=0,
+            first_play_urgency_reduction=0.5,
+        )
+        prior_mass_child = select_child(
+            parent,
+            exploration=0,
+            first_play_urgency_reduction=0.5,
+            use_first_play_urgency_prior_mass=True,
+        )
+
+        self.assertIs(fixed_reduction_child, visited_child)
+        self.assertIs(prior_mass_child, unvisited_child)
+
     def test_opponent_branch_pruning_keeps_highest_policy_moves(self) -> None:
         starting_state = GameState()
         opponent_state = play_move(starting_state, 0)
@@ -84,6 +142,32 @@ class SearchTest(unittest.TestCase):
         )
 
         self.assertGreater(len(node.children), 1)
+
+    def test_root_policy_temperature_sharpens_priors(self) -> None:
+        policy = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
+        policy[0] = 0.8
+        policy[1] = 0.2
+
+        class RootEvaluator:
+            def evaluate(
+                self,
+                game_state: GameState,
+            ) -> tuple[np.ndarray, float]:
+                return policy, 0
+
+        evaluator = RootEvaluator()
+        search_session = MokaSearchSession(
+            evaluator,
+            root_evaluator=evaluator,
+            root_policy_temperature=0.5,
+        )
+        starting_state = GameState()
+        root = search_session.align_root(starting_state)
+
+        search_session.refresh_root_evaluation(root, starting_state)
+
+        self.assertGreater(root.children[0].prior, 0.9)
+        self.assertLess(root.children[1].prior, 0.1)
 
 
 if __name__ == "__main__":

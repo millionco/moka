@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 from go_model.arena import create_opening_game_state
-from go_model.board import is_game_over, play_move
+from go_model.board import get_legal_moves, is_game_over, play_move
 from go_model.collect import select_greedy_rollout_move
 from go_model.config import (
     SEARCH_DISTILLATION_DEFAULT_GAME_COUNT,
@@ -27,7 +27,16 @@ def collect_search_distillation_dataset(
     opening_offset: int,
     opponent_branch_count: int,
     use_teacher_policy_targets: bool,
+    use_root_symmetry_ensemble: bool,
+    search_policy_blend: float,
+    search_sample_weight: float,
+    use_moka_turns_only: bool,
 ) -> dict[str, np.ndarray]:
+    if not 0 <= search_policy_blend <= 1:
+        raise ValueError("Search policy blend must be between zero and one.")
+    if search_sample_weight <= 0:
+        raise ValueError("Search sample weight must be positive.")
+
     model = create_moka_network(True, False, False, False, False)
     model.load_weights(str(checkpoint_path))
     model.eval()
@@ -37,6 +46,12 @@ def collect_search_distillation_dataset(
     policies: list[np.ndarray] = []
     values: list[float] = []
     game_ids: list[int] = []
+    sample_weights: list[float] = []
+    root_evaluator = (
+        MokaEvaluator(model, use_symmetry_ensemble=True)
+        if use_root_symmetry_ensemble
+        else None
+    )
 
     for game_id in range(game_count):
         game_state = create_opening_game_state(game_id, opening_offset)
@@ -44,6 +59,7 @@ def collect_search_distillation_dataset(
         search_session = MokaSearchSession(
             evaluator,
             opponent_branch_count=opponent_branch_count,
+            root_evaluator=root_evaluator,
         )
 
         while not is_game_over(game_state):
@@ -51,20 +67,38 @@ def collect_search_distillation_dataset(
             is_moka_turn = (game_state.next_color == 1) == is_moka_black
 
             if is_moka_turn:
+                root_policy = (
+                    root_evaluator.evaluate(game_state)[0]
+                    if root_evaluator is not None
+                    else evaluator.evaluate(game_state)[0]
+                )
                 move, target_policy = search_session.select_move_with_policy(
                     game_state,
                     simulation_count,
                 )
                 if use_teacher_policy_targets:
                     target_policy = teacher_policy
+                elif search_policy_blend < 1:
+                    legal_moves = get_legal_moves(game_state)
+                    legal_root_policy = np.zeros_like(root_policy)
+                    legal_root_policy[legal_moves] = root_policy[legal_moves]
+                    legal_root_policy /= np.sum(legal_root_policy)
+                    target_policy = (
+                        search_policy_blend * target_policy
+                        + (1 - search_policy_blend) * legal_root_policy
+                    )
             else:
                 move = select_greedy_rollout_move(game_state, teacher_policy)
                 target_policy = teacher_policy
 
-            features.append(encode_moka_features(game_state))
-            policies.append(target_policy)
-            values.append(teacher_value)
-            game_ids.append(game_id)
+            if is_moka_turn or not use_moka_turns_only:
+                features.append(encode_moka_features(game_state))
+                policies.append(target_policy)
+                values.append(teacher_value)
+                game_ids.append(game_id)
+                sample_weights.append(
+                    search_sample_weight if is_moka_turn else 1
+                )
             next_state = play_move(game_state, move)
 
             if next_state is None:
@@ -87,6 +121,7 @@ def collect_search_distillation_dataset(
         "features": np.asarray(features, dtype=np.float16),
         "game_ids": np.asarray(game_ids, dtype=np.int32),
         "policies": np.asarray(policies, dtype=np.float16),
+        "sample_weights": np.asarray(sample_weights, dtype=np.float16),
         "values": np.asarray(values, dtype=np.float16),
     }
 
@@ -128,6 +163,24 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--teacher-policy-targets",
         action="store_true",
     )
+    argument_parser.add_argument(
+        "--root-symmetry-ensemble",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--search-policy-blend",
+        type=float,
+        default=1,
+    )
+    argument_parser.add_argument(
+        "--search-sample-weight",
+        type=float,
+        default=1,
+    )
+    argument_parser.add_argument(
+        "--moka-turns-only",
+        action="store_true",
+    )
     return argument_parser
 
 
@@ -141,6 +194,10 @@ def main() -> None:
         arguments.opening_offset,
         arguments.opponent_branches,
         arguments.teacher_policy_targets,
+        arguments.root_symmetry_ensemble,
+        arguments.search_policy_blend,
+        arguments.search_sample_weight,
+        arguments.moka_turns_only,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)

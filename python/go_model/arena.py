@@ -24,10 +24,13 @@ from go_model.config import (
     SEARCH_AREA_VALUE_WEIGHT,
     SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
     SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
+    SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
+    SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
 )
 from go_model.features import (
@@ -80,6 +83,21 @@ def select_moka_move(
     random_seed: int,
     search_session: MokaSearchSession | None,
 ) -> int:
+    if (
+        game_state.move_count >= MINIMUM_TEACHER_PASS_MOVE_COUNT
+        and game_state.consecutive_pass_count == 1
+    ):
+        pass_state = play_move(game_state, BOARD_AREA)
+
+        if pass_state is not None:
+            did_black_win = get_area_score(pass_state) > 0
+            did_current_player_win = did_black_win == (
+                game_state.next_color == 1
+            )
+
+            if did_current_player_win:
+                return BOARD_AREA
+
     if rollout_count > 0:
         return select_rollout_move(
             evaluator,
@@ -159,6 +177,18 @@ def run_arena(
     adaptive_visit_margin_ratio: float = SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
     use_global_pool_network: bool = False,
     opponent_branch_count: int = SEARCH_OPPONENT_BRANCH_COUNT,
+    use_root_symmetry_ensemble: bool = False,
+    use_descendant_symmetry_pair: bool = False,
+    root_selection_visit_slack: int = -1,
+    root_capture_prior_bonus: float = 0,
+    root_self_atari_prior_penalty: float = 0,
+    search_first_play_urgency_reduction: float = (
+        SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+    ),
+    use_first_play_urgency_prior_mass: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
+    ),
+    root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -179,12 +209,23 @@ def run_arena(
         use_symmetry_ensemble,
         symmetry_rotation_count,
         should_flip_symmetry,
+        use_descendant_symmetry_pair,
+    )
+    root_evaluator = (
+        MokaEvaluator(model, use_symmetry_ensemble=True)
+        if use_root_symmetry_ensemble
+        else None
     )
     moka_win_count = 0
     moka_black_win_count = 0
     moka_white_win_count = 0
+    moka_move_cap_win_count = 0
     kata_go_win_count = 0
     move_cap_count = 0
+    moka_pass_count = 0
+    teacher_pass_count = 0
+    capped_repeated_position_count = 0
+    capped_unique_position_count = 0
     start_time = time.perf_counter()
 
     for game_index in range(game_count):
@@ -193,33 +234,81 @@ def run_arena(
         search_session = (
             (
                 MokaSequentialHalvingSearchSession(
-                    evaluator,
-                    sequential_halving_candidate_count,
-                    search_exploration,
-                    search_value_weight,
-                    search_area_value_weight,
-                    search_rollout_depth,
-                    adaptive_max_simulation_count,
-                    adaptive_visit_margin_ratio,
-                    opponent_branch_count,
+                    evaluator=evaluator,
+                    candidate_count=sequential_halving_candidate_count,
+                    exploration=search_exploration,
+                    value_weight=search_value_weight,
+                    area_value_weight=search_area_value_weight,
+                    rollout_depth=search_rollout_depth,
+                    adaptive_max_simulation_count=(
+                        adaptive_max_simulation_count
+                    ),
+                    adaptive_visit_margin_ratio=(
+                        adaptive_visit_margin_ratio
+                    ),
+                    opponent_branch_count=opponent_branch_count,
+                    root_evaluator=root_evaluator,
+                    root_selection_visit_slack=(
+                        root_selection_visit_slack
+                    ),
+                    root_capture_prior_bonus=root_capture_prior_bonus,
+                    root_self_atari_prior_penalty=(
+                        root_self_atari_prior_penalty
+                    ),
+                    first_play_urgency_reduction=(
+                        search_first_play_urgency_reduction
+                    ),
+                    use_first_play_urgency_prior_mass=(
+                        use_first_play_urgency_prior_mass
+                    ),
+                    root_policy_temperature=root_policy_temperature,
                 )
                 if sequential_halving_candidate_count > 0
                 else MokaSearchSession(
-                    evaluator,
-                    search_exploration,
-                    search_value_weight,
-                    search_area_value_weight,
-                    search_rollout_depth,
-                    adaptive_max_simulation_count,
-                    adaptive_visit_margin_ratio,
-                    opponent_branch_count,
+                    evaluator=evaluator,
+                    exploration=search_exploration,
+                    value_weight=search_value_weight,
+                    area_value_weight=search_area_value_weight,
+                    rollout_depth=search_rollout_depth,
+                    adaptive_max_simulation_count=(
+                        adaptive_max_simulation_count
+                    ),
+                    adaptive_visit_margin_ratio=(
+                        adaptive_visit_margin_ratio
+                    ),
+                    opponent_branch_count=opponent_branch_count,
+                    root_evaluator=root_evaluator,
+                    root_selection_visit_slack=(
+                        root_selection_visit_slack
+                    ),
+                    root_capture_prior_bonus=root_capture_prior_bonus,
+                    root_self_atari_prior_penalty=(
+                        root_self_atari_prior_penalty
+                    ),
+                    first_play_urgency_reduction=(
+                        search_first_play_urgency_reduction
+                    ),
+                    use_first_play_urgency_prior_mass=(
+                        use_first_play_urgency_prior_mass
+                    ),
+                    root_policy_temperature=root_policy_temperature,
                 )
             )
             if simulation_count > 0
             else None
         )
+        seen_position_keys: set[tuple[bytes, int]] = set()
+        repeated_position_count = 0
 
         while not is_game_over(game_state):
+            position_key = (
+                game_state.board.tobytes(),
+                game_state.next_color,
+            )
+            repeated_position_count += int(
+                position_key in seen_position_keys
+            )
+            seen_position_keys.add(position_key)
             is_moka_turn = (game_state.next_color == 1) == is_moka_black
             move = (
                 select_moka_move(
@@ -238,6 +327,8 @@ def run_arena(
                 if is_moka_turn
                 else select_teacher_move(teacher, game_state)
             )
+            moka_pass_count += int(is_moka_turn and move == BOARD_AREA)
+            teacher_pass_count += int(not is_moka_turn and move == BOARD_AREA)
             next_state = play_move(game_state, move)
 
             if next_state is None:
@@ -251,7 +342,13 @@ def run_arena(
         moka_black_win_count += int(did_moka_win and is_moka_black)
         moka_white_win_count += int(did_moka_win and not is_moka_black)
         kata_go_win_count += int(not did_moka_win)
-        move_cap_count += int(game_state.move_count >= MAXIMUM_GAME_MOVE_COUNT)
+        did_reach_move_cap = game_state.move_count >= MAXIMUM_GAME_MOVE_COUNT
+        move_cap_count += int(did_reach_move_cap)
+        moka_move_cap_win_count += int(did_moka_win and did_reach_move_cap)
+
+        if did_reach_move_cap:
+            capped_repeated_position_count += repeated_position_count
+            capped_unique_position_count += len(seen_position_keys)
 
     duration_seconds = time.perf_counter() - start_time
     print(
@@ -260,6 +357,11 @@ def run_arena(
         f"white={moka_white_win_count} "
         f"KataGo={kata_go_win_count} "
         f"caps={move_cap_count} "
+        f"MokaCapWins={moka_move_cap_win_count} "
+        f"MokaPasses={moka_pass_count} "
+        f"KataGoPasses={teacher_pass_count} "
+        f"CapRepeats={capped_repeated_position_count} "
+        f"CapUnique={capped_unique_position_count} "
         f"seconds={duration_seconds:.1f}"
     )
     return moka_win_count, kata_go_win_count, move_cap_count
@@ -288,6 +390,15 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--search-value-weight",
         type=float,
         default=SEARCH_PUCT_VALUE_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--search-fpu-reduction",
+        type=float,
+        default=SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
+    )
+    argument_parser.add_argument(
+        "--search-fpu-prior-mass",
+        action="store_true",
     )
     argument_parser.add_argument(
         "--search-area-value-weight",
@@ -321,6 +432,34 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--opponent-branches",
         type=int,
         default=SEARCH_OPPONENT_BRANCH_COUNT,
+    )
+    argument_parser.add_argument(
+        "--root-symmetry-ensemble",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--root-policy-temperature",
+        type=float,
+        default=SEARCH_ROOT_POLICY_TEMPERATURE,
+    )
+    argument_parser.add_argument(
+        "--descendant-symmetry-pair",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--root-selection-visit-slack",
+        type=int,
+        default=-1,
+    )
+    argument_parser.add_argument(
+        "--root-capture-prior-bonus",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--root-self-atari-prior-penalty",
+        type=float,
+        default=0,
     )
     argument_parser.add_argument("--lookahead-candidates", type=int, default=0)
     argument_parser.add_argument("--rollout-candidates", type=int, default=4)
@@ -363,6 +502,14 @@ def main() -> None:
         arguments.adaptive_visit_margin,
         arguments.global_pool,
         arguments.opponent_branches,
+        arguments.root_symmetry_ensemble,
+        arguments.descendant_symmetry_pair,
+        arguments.root_selection_visit_slack,
+        arguments.root_capture_prior_bonus,
+        arguments.root_self_atari_prior_penalty,
+        arguments.search_fpu_reduction,
+        arguments.search_fpu_prior_mass,
+        arguments.root_policy_temperature,
     )
 
 

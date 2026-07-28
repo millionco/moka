@@ -6,6 +6,7 @@ import numpy as np
 from go_model.board import (
     GameState,
     get_area_score,
+    get_group,
     get_legal_moves,
     is_game_over,
     play_move,
@@ -23,11 +24,14 @@ from go_model.config import (
     SEARCH_AREA_VALUE_START_MOVE_COUNT,
     SEARCH_AREA_VALUE_RAMP_MOVE_COUNT,
     SEARCH_AREA_VALUE_WEIGHT,
+    SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
+    SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_POLICY_EPSILON,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
+    SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_SEQUENTIAL_HALVING_REDUCTION_FACTOR,
     SEARCH_SIMULATION_BATCH_SIZE,
     SEARCH_VALUE_WEIGHT,
@@ -57,11 +61,13 @@ class MokaEvaluator:
         use_symmetry_ensemble: bool = False,
         symmetry_rotation_count: int = 0,
         should_flip_symmetry: bool = False,
+        use_symmetry_pair: bool = False,
     ) -> None:
         self.model = model
         self.use_symmetry_ensemble = use_symmetry_ensemble
         self.symmetry_rotation_count = symmetry_rotation_count
         self.should_flip_symmetry = should_flip_symmetry
+        self.use_symmetry_pair = use_symmetry_pair
         self.cache: dict[
             tuple[bytes, int, int, tuple[int, ...]],
             tuple[np.ndarray, float],
@@ -106,28 +112,40 @@ class MokaEvaluator:
                 self.symmetry_rotation_count != 0
                 or self.should_flip_symmetry
             )
+            use_transformed_symmetry = (
+                self.use_symmetry_ensemble
+                or use_fixed_symmetry
+                or self.use_symmetry_pair
+            )
 
-            if self.use_symmetry_ensemble or use_fixed_symmetry:
+            if use_transformed_symmetry:
                 empty_policy = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
                 transformed_features: list[np.ndarray] = []
 
                 for features in base_features:
-                    symmetry_options = (
-                        [
+                    if self.use_symmetry_ensemble:
+                        symmetry_options = [
                             (rotation_count, should_flip)
                             for rotation_count in range(
                                 BOARD_SYMMETRY_ROTATION_COUNT
                             )
                             for should_flip in (False, True)
                         ]
-                        if self.use_symmetry_ensemble
-                        else [
+                    elif self.use_symmetry_pair:
+                        symmetry_options = [
+                            (0, False),
                             (
                                 self.symmetry_rotation_count,
                                 self.should_flip_symmetry,
                             )
                         ]
-                    )
+                    else:
+                        symmetry_options = [
+                            (
+                                self.symmetry_rotation_count,
+                                self.should_flip_symmetry,
+                            )
+                        ]
 
                     for rotation_count, should_flip in symmetry_options:
                         symmetry_features, _ = apply_board_symmetry(
@@ -153,11 +171,13 @@ class MokaEvaluator:
             policies = np.exp(logits - maximum_logits)
             policies /= np.sum(policies, axis=1, keepdims=True)
 
-            if self.use_symmetry_ensemble or use_fixed_symmetry:
+            if use_transformed_symmetry:
                 symmetry_count = (
                     BOARD_SYMMETRY_ROTATION_COUNT
                     * BOARD_SYMMETRY_REFLECTION_COUNT
                     if self.use_symmetry_ensemble
+                    else 2
+                    if self.use_symmetry_pair
                     else 1
                 )
 
@@ -352,27 +372,120 @@ def expand_node(node: SearchNode, evaluator: MokaEvaluator) -> float:
     return value
 
 
+def adjust_root_tactical_priors(
+    root: SearchNode,
+    capture_prior_bonus: float,
+    self_atari_prior_penalty: float,
+) -> None:
+    if capture_prior_bonus == 0 and self_atari_prior_penalty == 0:
+        return
+
+    opponent_color = -root.game_state.next_color
+    opponent_stone_count = int(
+        np.count_nonzero(root.game_state.board == opponent_color)
+    )
+
+    for move, child in root.children.items():
+        next_opponent_stone_count = int(
+            np.count_nonzero(child.game_state.board == opponent_color)
+        )
+        captured_stone_count = (
+            opponent_stone_count - next_opponent_stone_count
+        )
+        is_non_capturing_self_atari = False
+
+        if move < BOARD_AREA and captured_stone_count == 0:
+            _, liberties = get_group(child.game_state.board, move)
+            is_non_capturing_self_atari = len(liberties) == 1
+
+        child.prior *= float(
+            np.exp(
+                capture_prior_bonus * captured_stone_count
+                - self_atari_prior_penalty
+                * int(is_non_capturing_self_atari)
+            )
+        )
+
+    adjusted_prior_sum = sum(child.prior for child in root.children.values())
+
+    if adjusted_prior_sum > 0:
+        for child in root.children.values():
+            child.prior /= adjusted_prior_sum
+
+
+def apply_search_policy_temperature(
+    policy: np.ndarray,
+    temperature: float,
+) -> np.ndarray:
+    if temperature <= 0:
+        raise ValueError("Search policy temperature must be positive.")
+
+    if temperature == 1:
+        return policy
+
+    tempered_policy = np.power(policy, 1 / temperature)
+    tempered_policy_sum = float(np.sum(tempered_policy))
+    return (
+        tempered_policy / tempered_policy_sum
+        if tempered_policy_sum > 0
+        else policy
+    )
+
+
 def select_child(
     node: SearchNode,
     reservation_counts: dict[int, int] | None = None,
     exploration: float = SEARCH_PUCT_EXPLORATION,
     value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
+    first_play_urgency_reduction: float = (
+        SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+    ),
+    use_first_play_urgency_prior_mass: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
+    ),
 ) -> SearchNode:
     reservation_counts = reservation_counts or {}
     parent_visit_scale = np.sqrt(
         max(node.visit_count + reservation_counts.get(id(node), 0), 1)
     )
+    visited_prior_mass = sum(
+        child.prior
+        for child in node.children.values()
+        if (
+            child.visit_count + reservation_counts.get(id(child), 0)
+        )
+        > 0
+    )
+    effective_first_play_urgency_reduction = (
+        first_play_urgency_reduction * np.sqrt(visited_prior_mass)
+        if use_first_play_urgency_prior_mass
+        else first_play_urgency_reduction
+    )
+
+    def get_child_score(child: SearchNode) -> float:
+        child_reservation_count = reservation_counts.get(id(child), 0)
+        effective_child_visit_count = (
+            child.visit_count + child_reservation_count
+        )
+        parent_value = (
+            node.mean_value - effective_first_play_urgency_reduction
+            if (
+                effective_child_visit_count == 0
+                and first_play_urgency_reduction >= 0
+            )
+            else -child.mean_value
+        )
+        return (
+            value_weight * parent_value
+            + exploration
+            * child.prior
+            * parent_visit_scale
+            / (effective_child_visit_count + 1)
+        )
+
     return max(
         node.children.values(),
-        key=lambda child: -value_weight * child.mean_value
-        + exploration
-        * child.prior
-        * parent_visit_scale
-        / (
-            child.visit_count
-            + reservation_counts.get(id(child), 0)
-            + 1
-        ),
+        key=get_child_score,
     )
 
 
@@ -385,6 +498,12 @@ def run_simulation(
     rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
     root_player_color: int | None = None,
     opponent_branch_count: int = SEARCH_OPPONENT_BRANCH_COUNT,
+    first_play_urgency_reduction: float = (
+        SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+    ),
+    use_first_play_urgency_prior_mass: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
+    ),
 ) -> float:
     if is_game_over(node.game_state):
         value = get_terminal_value(node.game_state)
@@ -415,6 +534,10 @@ def run_simulation(
             node,
             exploration=exploration,
             value_weight=value_weight,
+            first_play_urgency_reduction=first_play_urgency_reduction,
+            use_first_play_urgency_prior_mass=(
+                use_first_play_urgency_prior_mass
+            ),
         )
         value = -run_simulation(
             child,
@@ -425,6 +548,8 @@ def run_simulation(
             rollout_depth,
             root_player_color,
             opponent_branch_count,
+            first_play_urgency_reduction,
+            use_first_play_urgency_prior_mass,
         )
 
     node.visit_count += 1
@@ -442,6 +567,12 @@ def run_simulation_batch(
     rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
     root_player_color: int | None = None,
     opponent_branch_count: int = SEARCH_OPPONENT_BRANCH_COUNT,
+    first_play_urgency_reduction: float = (
+        SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+    ),
+    use_first_play_urgency_prior_mass: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
+    ),
 ) -> None:
     reservation_counts: dict[int, int] = {}
     search_paths: list[list[SearchNode]] = []
@@ -456,6 +587,8 @@ def run_simulation_batch(
                 reservation_counts,
                 exploration,
                 value_weight,
+                first_play_urgency_reduction,
+                use_first_play_urgency_prior_mass,
             )
             search_path.append(node)
 
@@ -548,6 +681,12 @@ def run_search_simulations(
     rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
     root_player_color: int | None = None,
     opponent_branch_count: int = SEARCH_OPPONENT_BRANCH_COUNT,
+    first_play_urgency_reduction: float = (
+        SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+    ),
+    use_first_play_urgency_prior_mass: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
+    ),
 ) -> None:
     remaining_simulation_count = simulation_count
 
@@ -561,6 +700,8 @@ def run_search_simulations(
             rollout_depth,
             root_player_color,
             opponent_branch_count,
+            first_play_urgency_reduction,
+            use_first_play_urgency_prior_mass,
         )
         remaining_simulation_count -= 1
 
@@ -579,6 +720,8 @@ def run_search_simulations(
             rollout_depth,
             root_player_color,
             opponent_branch_count,
+            first_play_urgency_reduction,
+            use_first_play_urgency_prior_mass,
         )
         remaining_simulation_count -= batch_simulation_count
 
@@ -591,6 +734,12 @@ def select_search_move(
     value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
     area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
     rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
+    first_play_urgency_reduction: float = (
+        SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+    ),
+    use_first_play_urgency_prior_mass: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
+    ),
 ) -> int:
     root = SearchNode(game_state=game_state, prior=1)
     run_search_simulations(
@@ -601,6 +750,10 @@ def select_search_move(
         value_weight,
         area_value_weight,
         rollout_depth,
+        first_play_urgency_reduction=first_play_urgency_reduction,
+        use_first_play_urgency_prior_mass=(
+            use_first_play_urgency_prior_mass
+        ),
     )
 
     if not root.children:
@@ -627,6 +780,17 @@ class MokaSearchSession:
             SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO
         ),
         opponent_branch_count: int = SEARCH_OPPONENT_BRANCH_COUNT,
+        root_evaluator: MokaEvaluator | None = None,
+        root_selection_visit_slack: int = -1,
+        root_capture_prior_bonus: float = 0,
+        root_self_atari_prior_penalty: float = 0,
+        first_play_urgency_reduction: float = (
+            SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+        ),
+        use_first_play_urgency_prior_mass: bool = (
+            SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
+        ),
+        root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
     ) -> None:
         self.evaluator = evaluator
         self.exploration = exploration
@@ -636,6 +800,17 @@ class MokaSearchSession:
         self.adaptive_max_simulation_count = adaptive_max_simulation_count
         self.adaptive_visit_margin_ratio = adaptive_visit_margin_ratio
         self.opponent_branch_count = opponent_branch_count
+        self.root_evaluator = root_evaluator
+        self.root_selection_visit_slack = root_selection_visit_slack
+        self.root_capture_prior_bonus = root_capture_prior_bonus
+        self.root_self_atari_prior_penalty = root_self_atari_prior_penalty
+        self.first_play_urgency_reduction = (
+            first_play_urgency_reduction
+        )
+        self.use_first_play_urgency_prior_mass = (
+            use_first_play_urgency_prior_mass
+        )
+        self.root_policy_temperature = root_policy_temperature
         self.root: SearchNode | None = None
 
     def align_root(self, game_state: GameState) -> SearchNode:
@@ -651,6 +826,58 @@ class MokaSearchSession:
         self.root = SearchNode(game_state=game_state, prior=1)
         return self.root
 
+    def refresh_root_evaluation(
+        self,
+        root: SearchNode,
+        game_state: GameState,
+    ) -> int:
+        if self.root_evaluator is None:
+            return 0
+
+        policy, network_value = self.root_evaluator.evaluate(game_state)
+        policy = apply_search_policy_temperature(
+            policy,
+            self.root_policy_temperature,
+        )
+
+        if root.children:
+            prior_sum = float(
+                np.sum(policy[list(root.children)])
+            )
+
+            for move, child in root.children.items():
+                child.prior = (
+                    float(policy[move] / prior_sum)
+                    if prior_sum > 0
+                    else 1 / len(root.children)
+                )
+
+            adjust_root_tactical_priors(
+                root,
+                self.root_capture_prior_bonus,
+                self.root_self_atari_prior_penalty,
+            )
+            return 0
+
+        expand_node_with_evaluation(
+            root,
+            policy,
+            game_state.next_color,
+            self.opponent_branch_count,
+        )
+        adjust_root_tactical_priors(
+            root,
+            self.root_capture_prior_bonus,
+            self.root_self_atari_prior_penalty,
+        )
+        root.visit_count += 1
+        root.value_sum += blend_search_value(
+            game_state,
+            network_value,
+            self.area_value_weight,
+        )
+        return 1
+
     def select_move(
         self,
         game_state: GameState,
@@ -665,16 +892,22 @@ class MokaSearchSession:
         simulation_count: int,
     ) -> tuple[int, np.ndarray]:
         root = self.align_root(game_state)
+        root_evaluation_count = self.refresh_root_evaluation(
+            root,
+            game_state,
+        )
         run_search_simulations(
             root,
             self.evaluator,
-            simulation_count,
+            max(simulation_count - root_evaluation_count, 0),
             self.exploration,
             self.value_weight,
             self.area_value_weight,
             self.rollout_depth,
             game_state.next_color,
             self.opponent_branch_count,
+            self.first_play_urgency_reduction,
+            self.use_first_play_urgency_prior_mass,
         )
         ordered_visit_counts = sorted(
             (
@@ -705,6 +938,8 @@ class MokaSearchSession:
                     self.rollout_depth,
                     game_state.next_color,
                     self.opponent_branch_count,
+                    self.first_play_urgency_reduction,
+                    self.use_first_play_urgency_prior_mass,
                 )
 
         if not root.children:
@@ -712,10 +947,27 @@ class MokaSearchSession:
             policy[BOARD_AREA] = 1
             return BOARD_AREA, policy
 
-        move, selected_child = max(
-            root.children.items(),
-            key=lambda move_and_child: move_and_child[1].visit_count,
-        )
+        selectable_root_children = list(root.children.items())
+
+        if self.root_selection_visit_slack >= 0:
+            maximum_visit_count = max(
+                child.visit_count for child in root.children.values()
+            )
+            selectable_root_children = [
+                move_and_child
+                for move_and_child in selectable_root_children
+                if move_and_child[1].visit_count
+                >= maximum_visit_count - self.root_selection_visit_slack
+            ]
+            move, selected_child = max(
+                selectable_root_children,
+                key=lambda move_and_child: -move_and_child[1].mean_value,
+            )
+        else:
+            move, selected_child = max(
+                selectable_root_children,
+                key=lambda move_and_child: move_and_child[1].visit_count,
+            )
         policy = np.zeros(BOARD_AREA + 1, dtype=np.float32)
         child_visit_sum = sum(
             child.visit_count for child in root.children.values()
@@ -744,16 +996,36 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
             SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO
         ),
         opponent_branch_count: int = SEARCH_OPPONENT_BRANCH_COUNT,
+        root_evaluator: MokaEvaluator | None = None,
+        root_selection_visit_slack: int = -1,
+        root_capture_prior_bonus: float = 0,
+        root_self_atari_prior_penalty: float = 0,
+        first_play_urgency_reduction: float = (
+            SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+        ),
+        use_first_play_urgency_prior_mass: bool = (
+            SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
+        ),
+        root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
     ) -> None:
         super().__init__(
-            evaluator,
-            exploration,
-            value_weight,
-            area_value_weight,
-            rollout_depth,
-            adaptive_max_simulation_count,
-            adaptive_visit_margin_ratio,
-            opponent_branch_count,
+            evaluator=evaluator,
+            exploration=exploration,
+            value_weight=value_weight,
+            area_value_weight=area_value_weight,
+            rollout_depth=rollout_depth,
+            adaptive_max_simulation_count=adaptive_max_simulation_count,
+            adaptive_visit_margin_ratio=adaptive_visit_margin_ratio,
+            opponent_branch_count=opponent_branch_count,
+            root_evaluator=root_evaluator,
+            root_selection_visit_slack=root_selection_visit_slack,
+            root_capture_prior_bonus=root_capture_prior_bonus,
+            root_self_atari_prior_penalty=root_self_atari_prior_penalty,
+            first_play_urgency_reduction=first_play_urgency_reduction,
+            use_first_play_urgency_prior_mass=(
+                use_first_play_urgency_prior_mass
+            ),
+            root_policy_temperature=root_policy_temperature,
         )
         self.candidate_count = candidate_count
 
@@ -763,6 +1035,10 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
         simulation_count: int,
     ) -> tuple[int, np.ndarray]:
         root = self.align_root(game_state)
+        root_evaluation_count = self.refresh_root_evaluation(
+            root,
+            game_state,
+        )
 
         if not root.children:
             run_simulation(
@@ -774,7 +1050,10 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                 self.rollout_depth,
                 game_state.next_color,
                 self.opponent_branch_count,
+                self.first_play_urgency_reduction,
+                self.use_first_play_urgency_prior_mass,
             )
+            root_evaluation_count += 1
 
         if not root.children:
             policy = np.zeros(BOARD_AREA + 1, dtype=np.float32)
@@ -786,7 +1065,10 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
             key=lambda move_and_child: move_and_child[1].prior,
             reverse=True,
         )[: self.candidate_count]
-        remaining_simulation_count = max(simulation_count - 1, 0)
+        remaining_simulation_count = max(
+            simulation_count - root_evaluation_count,
+            0,
+        )
 
         while len(candidates) > 1 and remaining_simulation_count > 0:
             remaining_round_count = max(
@@ -815,6 +1097,8 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                     self.rollout_depth,
                     game_state.next_color,
                     self.opponent_branch_count,
+                    self.first_play_urgency_reduction,
+                    self.use_first_play_urgency_prior_mass,
                 )
 
             remaining_simulation_count -= (

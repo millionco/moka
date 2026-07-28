@@ -1537,3 +1537,391 @@ The frozen symmetry-averaged top-eight candidate scored 51–49 on the full fixe
 The frozen candidate scored 52–48 on the sealed 100-game arena at opening offset 1,000, with 26 Black wins, 26 White wins, eight move caps, and a 1,349.0-second runtime. The checkpoint and all search settings were fixed before this arena was opened once. No final-arena position entered training, method selection, or hyperparameter selection.
 
 This independent majority confirms that the development result generalized. Moka uses no KataGo query during play: its 104,129-parameter nested checkpoint supplies every policy and value evaluation, while KataGo b6c96 supplies only the opposing moves.
+
+## 2026-07-27 — Website rollback and exact-artifact verification
+
+The nested search evaluator was removed from the website after the raw browser policy produced visibly pathological edge play and non-finite value displays. Its reported 52–48 result required 512 visits, top-eight opponent pruning, and eight-way symmetry averaging; none of those mechanisms existed in the browser runtime. The claim therefore described the search system rather than the deployed player.
+
+Production returned to `on-policy-v1`. Its browser weights have SHA-256 `0a2352de4302048c9bfe4679556358c27b5aeca317da2152b0412024d7244e58`, matching the previously deployed artifact byte for byte.
+
+The original 100-game browser arena was rerun with the exact rolled-back INT8 artifact and KataGo b6c96. It reproduced 2–98, 23 move caps, Moka Brier score 0.259, and KataGo Brier score 0.348. Moka won games 71 and 88. The unquantized MLX checkpoint scored 1–99 on the same deterministic openings and won only game 71. The one-game difference is quantization-induced policy drift, so the website's 2-of-100 statement is accurate specifically for the browser artifact users receive.
+
+Future promotion requires evaluation of the exact exported browser files. A candidate must produce finite policy and value outputs across the deployment test corpus, pass fixed human-play probes, and improve raw no-search play. Search-only strength cannot be presented as browser strength unless the same search system ships in the browser.
+
+## 2026-07-27 — Browser-targeted policy repair
+
+The exact nested INT8 browser artifact scored 16–84 on the original 100-game arena and 10–90 on a fresh 100-game arena at opening offset 120,000. This established the raw deployment baseline independently of the float checkpoint and the search system.
+
+The seed-averaged selective policy head scored 22–78 in float form but only 10–90 after INT8 export. Keeping that policy head at INT16 increased the artifact to 138,616 bytes but recovered only 17–83. The averaged head was rejected as quantization-fragile.
+
+Reproducing the strongest individual selective-head seed yielded 23–77 in float form. Its full INT8 export regressed to 12–88. Keeping only the policy weights at INT16 produced browser artifact `de07bf78e2b5c7c054b6b49c390b20b70b09bc7082586cf47a9b132357e2fc25`, measuring 138,616 bytes raw and 128,095 bytes with deterministic gzip.
+
+The exact mixed-precision browser artifact scored 20–80 on the original arena and 14–86 at fresh opening offset 120,000. On the matched fresh set, this improves the previous browser artifact by four wins and one fewer move cap. All policy logits and values remained finite.
+
+A fixed human-opening probe plays Black at intersections 20, 24, 56, and 60. Moka responded at 50, 48, 47, and 22, with zero first-line moves. This directly guards against the observed failure where White filled the top edge. The browser client now rejects any non-finite policy or value instead of allowing `NaN` into the interface.
+
+The mixed-precision candidate remains in the research arena. Production remains on the verified stable model until broader human-opening probes and another disjoint arena confirm the gain.
+
+## 2026-07-27 — On-policy browser correction
+
+### Preserved policy head
+
+Twenty thousand fresh positions from deterministic Moka-versus-KataGo trajectories at opening offset 150,000 were labeled by KataGo b6c96. A frozen-trunk policy-head correction used fourfold replay of this corpus and a 0.25 penalty against the starting policy.
+
+The float candidate and its starting checkpoint scored 18 and 17 wins across 200 games from offsets 160,000 and 170,000. Move caps fell from 27 to 18. The exact mixed browser exports scored 22 and 21 wins, respectively, with 27 versus 29 caps. The one-win edge is marginal, but middle-game policy KL fell from 0.5747 to 0.5320 and endgame teacher-move agreement rose from 72.0% to 75.3%.
+
+The accepted research artifact uses mixed INT8 trunk/value and INT16 policy tensors. Its weights are 138,616 bytes with SHA-256 `4a58dcfdb2febc826fcfc138c68ca2571716c6bfd4ed3a9690307efaee29a50c`. It passes the finite-output and fixed human-opening probes.
+
+### Rejected corrections
+
+A middle-game-weighted version lost one additional game on opening offset 180,000. Three sparse b18 middle-game corrections also failed their screen; the best full candidate scored 9–91 on offset 200,000 versus 11–89 for the preserved head. A wider eight-channel policy head, seed averaging, sibling seeds, and policy-head interpolation supplied no reproducible gain. These candidates were rejected and were not copied into the live arena.
+
+## 2026-07-27 — Low-budget browser search
+
+### Strength screen
+
+Sixteen-visit PUCT search was compared with raw policy play on five disjoint opening ranges:
+
+| Opening offset | Games | Raw wins | 16-visit wins |
+| -------------: | ----: | -------: | ------------: |
+|        220,000 |    20 |        1 |             4 |
+|        230,000 |    20 |        2 |             4 |
+|        240,000 |    20 |        1 |             2 |
+|        250,000 |    20 |        0 |             3 |
+|        260,000 |    40 |        5 |             3 |
+|      **Total** |   120 |    **9** |        **16** |
+
+Search improved aggregate wins but regressed on the final slice. It is therefore exposed as an optional arena mode, not presented as a stronger base checkpoint. Raw Moka remains the default.
+
+An exploration sweep on offset 250,000 scored 3, 4, 3, and 2 wins at PUCT constants 0.75, 1.0, 1.5, and 2.0. On offset 260,000, 1.0 scored four wins and 1.5 scored three. The browser uses 1.0.
+
+### Opponent-node pruning
+
+Restricting only simulated opponent nodes to Moka's four highest-prior replies preserved every result across 80 games from offsets 270,000 and 280,000: both unrestricted and top-four search scored 10–70 with eight move caps. Python runtime fell from 40.0 to 33.8 seconds, a 15.5% reduction. The browser implementation uses the same top-four rule.
+
+The arena now records the visit budget in run history. The exact browser artifact completed a four-game, 16-visit smoke run without illegal moves or non-finite outputs. Search remains deliberately opt-in because the JavaScript runtime cost is large relative to raw play.
+
+## 2026-07-27 — Search-policy compression attempt
+
+A fresh search-distillation corpus used 128 games from opening offset 300,000. Sixteen-visit Moka trajectories and KataGo replies produced 9,332 position-policy-value rows in a 984,426-byte archive.
+
+Three frozen-trunk policy-head seeds were trained with the existing 20,000-position on-policy corpus as preservation replay. Their first 20-game screen scored 2, 2, and 3 wins versus two for the incumbent. Only seed 3 advanced. On a fresh 100-game comparison at offset 320,000, seed 3 scored 14–86 while the incumbent scored 16–84, with thirteen move caps each.
+
+Search-policy compression did not transfer the runtime gain into the raw network and was rejected. The research arena continues to serve the preserved `4a58dcfd` artifact.
+
+## 2026-07-27 — Website promotion
+
+The exact preserved browser artifact was promoted to the main site under fingerprinted `4a58dcfd` URLs. Its deterministic gzip is 128,100 bytes and decompresses to weights with SHA-256 `4a58dcfdb2febc826fcfc138c68ca2571716c6bfd4ed3a9690307efaee29a50c`.
+
+The deferred site Worker was rebuilt with mixed INT8/INT16 decoding. The landing page retains its visibility, delay, and idle-callback gates, so neither the model nor its runtime enters the initial critical path. A production Next.js build, finite-output smoke test, human-opening probe, landing-page self-play check, and interactive Moka-page check all passed.
+
+## 2026-07-27 — Large browser-policy continuation
+
+### Fresh DAgger corpus
+
+The preserved browser checkpoint generated 100,000 deterministic Moka-versus-KataGo positions from opening offset 330,000. KataGo b6c96 labeled every reached state. Moka matched the teacher move on 54.2% of positions; the mean Goldilocks sample weight was 1.295. The compressed corpus occupies 16,681,298 bytes.
+
+Three frozen-trunk policy-head continuations and four low-rate full-network continuations used the new corpus with the earlier 20,000-position on-policy set as replay. On a fresh 20-game screen at offset 440,000, the incumbent scored three wins. The head-only candidates scored three, two, and two; the full-network candidates scored two, two, two, and three. All were rejected.
+
+### Symmetry and low-budget search
+
+Eight-way symmetry averaging and every individual board orientation were neutral over 40 games from offset 450,000. On 100 games from offset 460,000, raw policy and two visits each scored eleven wins, while four and eight visits scored six and eight. Sixteen visits scored three wins over the first 40 games. None advanced.
+
+### Strong-teacher replay
+
+Three frozen-trunk heads used 50,000 native b18 labels from greedy Moka trajectories plus 20,000 b6 on-policy positions. The only first-stage candidate scored five wins versus four over 40 games, then regressed to seven versus eight on a disjoint 100-game confirmation.
+
+A broader replay balance combined the same b18 trajectories with the new 100,000-position b6 corpus. Its only first-stage candidate scored six wins versus five, then regressed to twelve versus sixteen over 100 new games. Policy-head interpolation was neutral. Both strong-teacher branches were rejected.
+
+### Hard-target correction
+
+The original compact Moka recipe used a 50% hard teacher-move target, while the first large-corpus continuations used only the soft distribution. Restoring the 50% hard target improved all three frozen-trunk seeds on an initial 40-game screen. Their equal-weight policy-head average then scored 13–87 on offset 540,000 versus 7–93 for the incumbent.
+
+The exact mixed INT8/INT16 browser artifact had SHA-256 `e8fc6d525e79015a9a7eb56d1fbef7cee9723a61abed79e5ff8f4ba632f96c4a`, remained 138,616 bytes, passed finite-output and human-opening probes, and scored:
+
+| Browser offset |  Candidate |  Incumbent |
+| -------------: | ---------: | ---------: |
+|        550,000 |      12–88 |      10–90 |
+|        560,000 |      11–89 |      11–89 |
+|      **Total** | **23–177** | **21–179** |
+
+The candidate added four move caps across the same 200 games. A quantization-aware continuation improved three seeds on its first 40-game proxy but tied or regressed on a 100-game confirmation.
+
+Hard-target mixtures of 25%, 50%, 75%, and 100% were then compared through seed-averaged heads. On offset 590,000, the incumbent scored eight of 40 while the mixtures scored five, two, two, and two. The apparent hard-50 gain was therefore opening-slice dependent and did not generalize.
+
+### Conclusion
+
+The 100,000-position corpus is useful, and hard targets can shift game outcomes substantially, but no candidate cleared the multi-slice exact-browser gate. Production and the research arena remain on browser artifact `4a58dcfd`. Further work should change the sequential objective or representation rather than repeat frozen-head imitation on the same teacher labels.
+
+## 2026-07-27 — Group-relative outcome training
+
+### Outcome corpora
+
+The outcome generator gained a greedy-opponent mode so KataGo always selected its highest-policy legal reply while Moka sampled alternatives within each shared opening group. The first 1,024-game corpus contained 80,582 positions and 40,224 Moka decisions, but only 13 wins. Its SHA-256 was `8c0b99c9dbb487ebd05a32c90f35ce21d5e8f124f77e2a15d020a3ce3ac663f0`.
+
+Fixed Moka sampling temperatures of 0.25, 0.4, and 0.6 produced 12, 16, and 3 wins over 128-game screens. Temperature 0.4 advanced to a second 1,024-game corpus with 60,762 positions, 30,215 Moka decisions, and 85 wins split 44 as Black and 41 as White. Every eight-game opening group varied in outcome. The corpus SHA-256 was `480680eb187faa5519b7ce4bf942b3edab6e4a15ac5793d44de7d5c6df91c0fa`.
+
+### Rejected objectives
+
+Pure group-relative policy optimization, distilled variants, success-routed variants, and multiple seeds all produced initial slice gains that disappeared on independent openings. The strict success-routed candidate scored 5–35 versus 4–36 on its first screen, then every seed scored 1–39 versus 2–38 on the next slice. None reproduced, so no outcome-trained weights were exported or promoted.
+
+The negative result suggests that 85 wins are still too sparse for stable group-relative optimization at this capacity. Future outcome work needs substantially more successful trajectories or a dense teacher-derived advantage target rather than stronger weighting of the same sparse returns.
+
+## 2026-07-27 — Deployment-matched deeper browser search
+
+### Budget and batching screen
+
+Low-budget PUCT was retested with the exact mixed INT8/INT16 browser artifact. A packed Worker protocol now sends each multi-position evaluation wave in one message and validates every returned policy and value.
+
+On a fresh exact-browser 20-game slice at offset 690,000, raw play scored 2–18. Eight, 16, and 64 visits scored 1–19, 6–14, and 6–14. The 16-visit run completed in 52 seconds versus 192 seconds for 64 visits and produced one rather than four move caps. On offset 700,000, raw, 16, and 32 visits scored 7–33, 8–32, and 9–31; 32 visits produced nine move caps. Sixteen visits remained the practical budget.
+
+The original search evaluated eight reserved leaves per root wave. Reducing this internal batch to one makes the same 16 model evaluations build a deeper tree. Opponent pruning was also removed: at 16 visits, full legal branching and widths four, eight, and sixteen produced identical decisions on the measured 100-game slice.
+
+| Python opening offset | Games | Eight-leaf waves | One-leaf waves |
+| --------------------: | ----: | ---------------: | -------------: |
+|               720,000 |   100 |               17 |             28 |
+|               730,000 |   100 |                7 |             19 |
+|             **Total** |   200 |           **24** |         **47** |
+
+None of the 47 Moka wins was awarded at the move cap. The one-leaf runs produced 24 and 23 caps respectively, but every capped game was a Moka loss. The strength gain is therefore not an unfinished-board scoring artifact.
+
+The exact browser implementation reproduced the deeper tree at offset 740,000: 6–14 versus 2–18 for raw play. Local interactive responses after model initialization took 102 ms and 86 ms. Search is dynamically imported only when a person starts a game; deferred model loading and raw sampled self-play remain unchanged.
+
+### Termination diagnosis
+
+On 40 games from offset 750,000, the 16-visit control scored 9–31 with eleven caps. A 0.05 late-area blend scored eight wins with ten caps, a 0.15 blend scored seven with eight caps, and a one-ply rollout scored seven with eleven caps while increasing runtime from about 40 to 69 seconds. Each reduced or preserved both strength and caps, so all were rejected.
+
+The capped games contained 1,276 unique side-to-move positions and zero repeated positions. Across the full run, Moka passed 265 times and KataGo passed 96 times. Raising the earliest allowed pass from move 20 to 24 produced identical play; raising it to 40 lost one win without changing caps, and raising it to 60 added a cap. The failure is therefore neither a ko loop nor simple refusal to pass. Moka passes, KataGo finds another profitable move, and the losing game continues. No cosmetic termination rule was promoted.
+
+### Visit-count confirmation
+
+With one-leaf search waves fixed, visit budgets 16, 20, 24, and 32 scored 9, 11, 10, and 6 wins over the same 40 games. Their cap counts were 11, 10, 14, and 5. Twenty visits advanced to a preselected independent comparison at offset 760,000.
+
+On the independent 100-game block, 16 visits scored 16–84 with 22 caps. Twenty visits scored 15–85 with 25 caps and took 119.6 seconds versus 98.0 seconds. The apparent 20-visit gain did not reproduce, so the browser remains at 16.
+
+### Cross-turn tree reuse
+
+The Python arena keeps the selected subtree after Moka's move and aligns it to the opponent's reply when that reply was already expanded. The first browser deployment rebuilt an empty tree every turn. The site now retains the same bounded subtree across turns and resets it whenever the move history no longer matches, including a new game or an undo into an unretained branch.
+
+This adds no model bytes or evaluations. A clean production build completed two searched replies and a new-game reset without stale-state or legality errors. The live second response took 120 ms. The deployed implementation now matches the state-reuse behavior used by the Python strength measurements.
+
+### Root-only symmetry ensemble
+
+Moka's eight dihedral orientations were averaged only at each real move's root. Descendant evaluations remained canonical, the model stayed fixed, and no KataGo output was available to the search. Batched MLX evaluation kept runtime effectively unchanged.
+
+| Opening offset | Games | Canonical root | Symmetry root |
+| -------------: | ----: | -------------: | ------------: |
+|        770,000 |    40 |              5 |            10 |
+|        780,000 |   100 |             17 |            26 |
+|      **Total** |   140 |         **22** |        **36** |
+
+On the 100-game confirmation, caps fell from 35 to 18. None of the symmetry candidate's wins came from a capped game. The improvement reproduced across colors: the candidate scored five Black and five White wins on the screen, then eleven Black and fifteen White wins on confirmation.
+
+The exact mixed-precision browser implementation matched the float search on all four fixed opening probes: moves 20, 24, 56, and 60 produced replies 50, 48, 32, and 30 in both runtimes. Production-mode replies took 166–179 ms after startup. Lighthouse remained 96, and the symmetry/search chunks were absent from its initial request set.
+
+Root-only symmetry was promoted in commit `05707ac`. Live production reproduced C7→F4 and G3→D6; the cold first reply took 335 ms and the warm reply took 167 ms.
+
+### Symmetry-search visit count
+
+The root-symmetry candidate changed the useful depth range. On offset 770,000, 20 visits scored 12–28 with six caps versus 10–30 with eleven caps at 16 visits. A frozen independent comparison on 100 games from offset 790,000 scored:
+
+| Root-symmetry budget | Wins | Caps | Runtime |
+| -------------------: | ---: | ---: | ------: |
+|            16 visits |   22 |   31 | 138.7 s |
+|            20 visits |   27 |   23 | 160.3 s |
+
+All wins completed normally. The 20-visit candidate improved both colors, from 8 Black and 14 White wins to 11 Black and 16 White wins.
+
+The exact mixed-precision browser still matched all four fixed probes at 20 visits. Production-mode replies took 195–200 ms after initialization. Lighthouse behavior was unchanged because the search remains interaction-gated. The 20-visit budget was promoted in commit `4a638bb`; the live cold probe replied C7→F4 in 429 ms without runtime errors.
+
+### Descendant symmetry scheduling
+
+Cycling a single descendant orientation by absolute move depth was tested at the same 20-visit budget. This added no model evaluations or bytes: the root still averaged all eight orientations, while each descendant used one orientation selected from its move count.
+
+On 40 games from opening offset 800,000, canonical descendants scored 13–27 with nine caps. Depth-cycled descendants scored 12–28 with eight caps. Neither configuration received a win at the move cap. The depth schedule was rejected because it lost one completed game and merely reduced caps by one.
+
+Round-robin scheduling then assigned each newly evaluated descendant the next orientation, distributing views across sibling branches while preserving one evaluation per leaf. It scored 10–30 with nine caps on the same block. This also regressed from the 13-win control and was rejected.
+
+Paired descendant inference averaged canonical features with one complementary orientation, doubling descendant inference without changing the model. On 20 games from opening offset 810,000, the canonical control scored six wins with four caps. Canonical plus 180° rotation scored four wins with six caps, canonical plus reflection scored five with four caps, and canonical plus 90° rotation scored four with three caps. All three lost completed games and were rejected.
+
+### Root-symmetry search at 28 visits
+
+Root symmetry changed the useful visit range, so budgets above 20 were screened separately from the earlier canonical-root sweep. On 20 games from opening offset 820,000, budgets 20, 24, 28, and 32 scored seven, seven, nine, and eight wins. Their cap counts were seven, four, three, and three. Twenty-eight visits was frozen before a fresh confirmation.
+
+On 100 games from opening offset 830,000, 20 visits scored 22–78 with 13 Black wins, nine White wins, and 21 caps. Twenty-eight visits scored 28–72 with 14 Black wins, 14 White wins, and 15 caps. The control received no cap-awarded wins; the candidate received one, leaving a conservative completed-game comparison of 27 versus 22. Runtime increased from 164.3 to 209.1 seconds.
+
+The exact mixed-precision browser path matched Python on the four fixed human probes. Human moves 20, 24, 56, and 60 produced Moka replies 50, 48, 47, and 22 in both runtimes. Production-mode browser replies took 265 ms cold and 252–253 ms warm, with no console errors. The model, Worker, initial request set, and deferred loading gates were unchanged.
+
+The 28-visit budget was promoted in commit `3f8c4f3`. Live production reproduced C7→F4 and G7→D4; the first reply took 720 ms after cold dynamic imports, and the warm reply took 254 ms without console errors.
+
+### Adaptive search ceiling
+
+Starting at 20 visits and extending close roots to 36 visits at top-two visit-margin thresholds 0.1, 0.2, and 0.3 tied the fixed 28-visit control at five wins on 20 games from opening offset 840,000. A 48-visit ceiling at threshold 0.1 scored six wins with zero caps versus five wins and two caps for fixed 28; thresholds 0.2 and 0.3 scored five and six.
+
+The 20→48, 0.1-margin candidate was frozen for a 100-game comparison at opening offset 850,000. Fixed 28 scored 30–70 with 19 Black wins, 11 White wins, 18 caps, and no cap-awarded wins. Adaptive search scored 27–73 with 18 Black wins, nine White wins, 11 caps, and no cap-awarded wins. Runtime fell from 160.6 to 139.2 seconds, but the candidate lost three completed games and was rejected.
+
+### Sequential halving
+
+The sequential-halving session had an unexercised constructor error and did not accept the root-symmetry evaluator. The research path was repaired so it refreshes averaged root priors and charges that evaluation against the fixed budget.
+
+On 20 games from opening offset 860,000, plain 28-visit PUCT scored six wins with two caps. Sequential halving with four, eight, and 12 root candidates scored three, three, and two wins, with one, two, and four caps. All configurations regressed materially and were rejected.
+
+### Root value tie-breaking
+
+Final move selection was allowed to prefer the better searched value among children tied for the most visits or trailing by one or two visits. On 20 games from opening offset 870,000, visit slacks zero, one, and two reproduced every control decision exactly: all scored five wins with four caps. The rule was behaviorally inert on the measured roots and was not promoted.
+
+### Root tactical priors
+
+A root-only rule prior rewarded immediate captures and penalized non-capturing self-atari using only the visible board and legal move results. Capture bonuses 0.25 and 1.0, self-atari penalties 0.5 and 2.0, and both paired settings reproduced every control decision on 20 games from opening offset 880,000. All variants scored one win with one cap. The adjustment was inert even at aggressive weights and was rejected.
+
+### Root-symmetry value weight
+
+The policy–value balance was rescreened because earlier value-weight tests used a different search topology. On 20 games from opening offset 890,000, weights 0.5, 0.75, 1.0, 1.25, 1.5, and 2.0 scored four, two, six, six, five, and one win. Cap counts were two, four, two, three, seven, and 11. The deployed weight 1.0 retained the joint win-and-cap lead; every alternative was rejected.
+
+### Cycle conclusion
+
+The only reproducible strength gain in this cycle was root-symmetry search at 28 visits, promoted in commit `3f8c4f3`. Depth-cycled symmetry, round-robin symmetry, paired descendant inference, adaptive ceilings, sequential halving, root value tie-breaking, tactical priors, and alternate value weights either tied, regressed, or failed fresh confirmation.
+
+The next model-side experiment should train a dense action-ranking or child-value target from search comparisons on Moka-reached states. Repeating policy-head imitation or sparse outcome weighting is unlikely to help: those objectives already failed across independent openings, while the accepted gain came from resolving local action ranking more accurately at inference time.
+
+## 2026-07-28 — Deployment-matched search distillation
+
+### Dense 28-visit corpus
+
+The collector was aligned to the deployed player: one-leaf search waves, 28 visits, full legal branching, subtree reuse, and eight-symmetry averaging at every real root. Moka search supplied its own offline trajectory and visit target; KataGo b6c96 supplied opponent moves and value labels during data generation only.
+
+Each Moka target mixed 75% search visits with 25% legal averaged root policy and received 4× sample weight. This retained dense support rather than collapsing targets to one-hot choices. The 128-game corpus from opening offset 900,000 contained 9,659 positions and 4,821 weighted Moka roots. Whole-game splits contained 7,589 training, 1,043 validation, and 1,027 test positions. Search targets averaged 44.2 nonzero moves and 0.387 top-move probability. The corpus SHA-256 was `b79fa044c60bc04f64f34dd61029e72faba8d8af252608ac6601658e9c240508`.
+
+### Soft policy-head continuation
+
+Three frozen-trunk policy-head seeds used the earlier 20,000-position browser on-policy corpus as preservation replay and a 0.25 logit-preservation penalty. All improved dense-target test loss from the incumbent's 2.7897 to 2.7749–2.7769, but reduced top-move agreement from 62.51% to 61.6–62.3%.
+
+On a 20-game search screen at opening offset 920,000, the incumbent and seeds 41, 42, and 43 scored four, four, five, and four wins. Seed 42 alone advanced. On 100 fresh games from offset 930,000, the incumbent scored 34–66 with 20 Black wins, 14 White wins, 18 caps, and no cap-awarded wins. Seed 42 scored 29–71 with 17 Black wins, 12 White wins, 14 caps, and no cap-awarded wins. The soft candidate was rejected.
+
+### Hard search-move mixture
+
+A predeclared 25% hard-search-move mixture trained three more frozen-trunk seeds on the same corpus. Validation agreement rose to 63.5–64.0%, but untouched test agreement fell to 61.5–61.6%. On a 20-game search screen at opening offset 940,000, the incumbent and seeds 44, 45, and 46 scored five, four, five, and five wins. Every candidate added a cap or lost a completed game, so none advanced.
+
+### Moka-turn-only search distillation
+
+The next corpus removed opponent decision points entirely and retained only Moka roots. It contained 9,702 decisions from 256 games beginning at opening offset 1,000,000, split by whole game into 7,715 training, 983 validation, and 1,004 test positions. Targets again mixed 75% of the 28-visit distribution with 25% of the averaged root policy, but used 2× rather than 4× sample weight to balance the earlier on-policy replay. Policies averaged 44.5 nonzero moves and 0.396 top-move probability. The corpus SHA-256 was `2b47622971a3567adeec97bf1da10fda20f707c7a5c57d1c1e2d5ebc81cb505b`.
+
+Three frozen-trunk heads reduced untouched test loss from 2.5958 to 2.5840–2.5848. Seed 47 also raised test top-move agreement from 78.09% to 78.39%; seeds 48 and 49 scored 77.89% and 78.29%.
+
+On a predeclared 20-game screen at opening offset 1,100,000, the incumbent and seeds 47, 48, and 49 scored six, eight, six, and nine wins. Cap counts were five, five, four, and five. Seed 49 was frozen as the only confirmation candidate.
+
+On 100 fresh games from opening offset 1,110,000, both the incumbent and seed 49 scored 34–66. The incumbent split 13 Black and 21 White wins with 18 caps and no cap-awarded wins. Seed 49 split 14 Black and 20 White wins with 31 caps and one cap-awarded win. Conservative completed wins therefore regressed from 34 to 33. The focused distillation candidate was rejected.
+
+### Late-state balancing
+
+Only 338 of the 9,702 Moka-turn samples occurred after the 50th recorded Moka decision. A predeclared phase correction increased those rows to 10× their original relative weight while leaving the architecture, search targets, replay corpus, and preservation penalty unchanged. After normalization, early and middle rows had weight 0.761 and late rows had weight 7.613. The reweighted corpus SHA-256 was `c934c80059192e166f2f5cb30fdac8b2b5076dcd34e81bbffb2f48aed6206c05`.
+
+Three frozen-trunk heads reduced late-state test loss from 2.2655 to 2.2600–2.2611 while preserving the incumbent's top move on all 39 late test rows. Seed 52 had the best full-test agreement at 78.59%.
+
+On a fresh 20-game screen at opening offset 1,120,000, the incumbent and seeds 50, 51, and 52 scored five, five, six, and six wins. Their cap counts were one, four, three, and two. Seed 52 was frozen because it had the best joint screen and held-out result.
+
+On 100 new games from opening offset 1,130,000, the incumbent scored 26–74 with 12 Black wins, 14 White wins, 12 caps, and no cap-awarded wins. Seed 52 scored 23–77 with 11 Black wins, 12 White wins, 11 caps, and no cap-awarded wins. The candidate lost three completed games and was rejected.
+
+Search distillation improved dense-target loss consistently, but neither Moka-turn filtering nor late-state balancing produced a reproducible game-strength gain. No distilled checkpoint was exported or promoted.
+
+## 2026-07-28 — Low-budget PUCT exploration
+
+### Root-symmetry screen
+
+PUCT exploration had previously been tuned only under the old 256-visit search. It was rescreened with the deployed evaluator, one-leaf expansion, root symmetry ensemble, and 28 visits.
+
+On 20 games from opening offset 1,140,000, exploration coefficients 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, and 3.0 scored four, five, three, three, five, seven, three, and seven wins. Their cap counts were 12, nine, ten, three, two, two, one, and two. Coefficient 2.0 was frozen because it matched the best win-and-cap result with the smallest change from production's 1.5.
+
+### Independent confirmation
+
+Two disjoint 100-game blocks compared the frozen 2.0 candidate with production:
+
+| Opening offset | Exploration 1.5 |   Caps | Exploration 2.0 |   Caps |
+| -------------: | --------------: | -----: | --------------: | -----: |
+|      1,150,000 |              25 |     20 |              26 |     16 |
+|      1,160,000 |              28 |     15 |              28 |     12 |
+|      **Total** |          **53** | **35** |          **54** | **28** |
+
+Every win completed normally. Exploration 2.0 added one completed win and removed seven caps over 200 fresh games without changing the model, visit count, inference count, or browser payload.
+
+## 2026-07-28 — Parent-value first-play urgency
+
+### Harness correction
+
+The ordinary arena session parsed root-selection and tactical-prior options but did not pass them into `MokaSearchSession`. Their earlier bit-for-bit "inert" results were therefore invalid measurements rather than evidence that the methods had no effect. The session construction now uses named arguments and passes every root option. The sequential-halving constructor received the same correction.
+
+### First-play urgency
+
+The deployed tree assigned every unvisited child a value of zero. A parent-value first-play urgency candidate instead initializes an unvisited move from the current node's mean value minus a fixed reduction. This uses only Moka's own evaluation and changes neither the model nor the visit budget.
+
+On 20 games from opening offset 1,170,000, the absolute-zero control and reductions 0, 0.1, 0.25, and 0.5 scored four, six, seven, seven, and five wins. Their cap counts were two, four, two, one, and three. Reduction 0.25 was frozen because it matched the best win count with the fewest caps.
+
+### Independent confirmation
+
+Two disjoint 100-game blocks compared the frozen 0.25 candidate with the exploration-2.0 production search:
+
+| Opening offset | Absolute zero |   Caps | FPU 0.25 |   Caps |
+| -------------: | ------------: | -----: | -------: | -----: |
+|      1,180,000 |            25 |     15 |       27 |      6 |
+|      1,190,000 |            27 |     10 |       35 |      6 |
+|      **Total** |        **52** | **25** |   **62** | **12** |
+
+Every win completed normally. Parent-value FPU added ten completed wins and removed 13 caps over 200 fresh games. It requires no additional model evaluations, weights, payload bytes, or KataGo information at runtime.
+
+### Corrected root value selection
+
+With the ordinary session wiring repaired, value-aware final move selection was rerun under exploration 2.0, FPU 0.25, root symmetry, and 28 visits. On 20 games from opening offset 1,200,000, ordinary maximum-visit selection scored eight wins with one cap. Choosing the best searched value among exact visit ties or children trailing by one or two visits scored seven wins with three, five, and two caps respectively.
+
+Unlike the earlier invalid inert measurement, the corrected options changed play. Every setting lost one completed game, so value-aware final selection was rejected.
+
+### Corrected tactical root priors
+
+The repaired ordinary session also made the root capture and self-atari adjustments effective. On 20 games from opening offset 1,210,000, production scored nine wins with zero caps. Capture bonuses 0.25 and 0.5 each scored eight wins with zero caps. Self-atari penalties 0.5 and 1.0 scored eight and nine wins, also with zero caps.
+
+No tactical prior improved the joint result. The rules-based root adjustments were rejected.
+
+### Prior-mass first-play urgency
+
+A standard FPU variant scaled the reduction by the square root of the prior mass already visited at the node. On 20 games from opening offset 1,220,000, fixed FPU 0.25 scored seven wins with zero caps. Prior-mass reductions 0.25, 0.5, and 0.75 scored six, six, and eight wins, also with zero caps. Reduction 0.75 was frozen as the only screen winner.
+
+On 100 fresh games from opening offset 1,230,000, fixed FPU scored 29–71 with 14 Black wins, 15 White wins, seven caps, and no cap-awarded wins. Prior-mass FPU scored 25–75 with 11 Black wins, 14 White wins, ten caps, and no cap-awarded wins. It lost four completed games and was rejected.
+
+### Root-policy temperature
+
+The symmetry-averaged root policy was sharpened or flattened before allocating the same 28 visits. On 20 games from opening offset 1,240,000, temperatures 0.5, 0.75, 1.0, 1.25, and 1.5 scored seven, six, five, five, and five wins. Their cap counts were zero, two, zero, one, and two. Temperature 0.5 was frozen as the only clear joint screen winner.
+
+On 100 fresh games from opening offset 1,250,000, production scored 36–64 with 17 Black wins, 19 White wins, seven caps, and no cap-awarded wins. Temperature 0.5 scored 26–74 with 13 Black wins, 13 White wins, four caps, and no cap-awarded wins. Sharpening lost ten completed games and was rejected.
+
+### Post-FPU exploration retuning
+
+Because FPU changed the policy–value allocation, exploration was retuned under fixed FPU 0.25. On 20 games from opening offset 1,260,000, coefficients 1.5, 1.75, 2.0, 2.25, and 2.5 scored six, seven, six, seven, and five wins. Their cap counts were one, two, one, one, and zero. Coefficient 2.25 was frozen as the best joint screen result.
+
+On the first 100-game confirmation block at opening offset 1,270,000, production 2.0 scored 34–66 with five caps, while 2.25 scored 35–65 with seven caps. A second predeclared block at offset 1,280,000 scored 36–64 with seven caps for production and 35–65 with eight caps for the candidate.
+
+Across 200 games, both settings won 70 completed games. Candidate caps increased from 12 to 15, so exploration 2.25 was rejected and production remained at 2.0.
+
+### Opponent branch width under FPU
+
+Opponent reply pruning was rescreened because FPU changed low-budget allocation. On 20 games from opening offset 1,290,000, full branching and widths two, four, eight, and 16 scored nine, eight, nine, nine, and eight wins. Every setting produced one cap. Width eight also produced 41 repeated positions inside its capped game, while the full-branching cap had none.
+
+No pruned width improved completed wins, and one introduced repetition-heavy behavior. Full opponent branching was retained.
+
+### Visit count under FPU
+
+The visit budget was rescreened because FPU changed low-budget allocation. On 20 games from opening offset 1,300,000, budgets 20, 24, 28, 32, 36, and 40 scored seven, six, six, three, five, and ten wins. Their cap counts were three, one, four, four, three, and one. Forty visits was frozen as the clear strength-and-cap screen winner.
+
+On the first 100-game confirmation block at opening offset 1,310,000, 28 visits scored 30–70 with three caps in 183.8 seconds. Forty visits scored 32–68 with eight caps in 226.1 seconds.
+
+On a second predeclared block at offset 1,320,000, 28 visits scored 38–62 with seven caps in 165.1 seconds. Forty visits scored 42–58 with five caps in 268.4 seconds.
+
+Across 200 games, 40 visits added six completed wins, 74 versus 68, but increased caps from ten to 13 and runtime from 348.9 to 494.5 seconds. It failed the predeclared no-cap-regression gate and was not promoted as a fixed budget.
+
+### Adaptive 28-to-40 visits
+
+Adaptive search started at 28 visits and extended only roots whose top-two visit margin remained below a threshold. On 20 games from opening offset 1,330,000, production scored seven wins with three caps, while fixed 40 visits scored nine with one cap. Adaptive thresholds 0.1, 0.2, and 0.3 scored five, eight, and eight wins, each with one cap. Threshold 0.2 was frozen because it matched the best adaptive result with lower runtime.
+
+On the first 100-game confirmation block at opening offset 1,340,000, production scored 30–70 with nine caps in 134.4 seconds. Adaptive search scored 33–67 with four caps in 149.3 seconds.
+
+On a second predeclared block at offset 1,350,000, production scored 30–70 with eight caps in 128.1 seconds. Adaptive search regressed to 25–75 with six caps in 151.8 seconds.
+
+Across 200 games, adaptive search lost two completed games, 58 versus 60, while reducing caps from 17 to ten and increasing runtime from 262.5 to 301.1 seconds. It was rejected.
