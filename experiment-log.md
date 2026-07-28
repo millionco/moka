@@ -2945,3 +2945,28 @@ Two untouched 100-game blocks compared the frozen candidate with the control on 
 Control runtime was 574.5 seconds in aggregate. Shared-value runtime was 624.1 seconds, an 8.6% increase.
 
 The candidate tied one block and added only one game in the other. That effect is too small to establish improved strength and does not justify the runtime cost. Transposition sharing is rejected, and its runtime path was removed. The accepted player, checkpoint, and INT8 artifact are unchanged. No website files were touched.
+
+## 2026-07-28 — Search-disagreement preference optimization
+
+### Hypothesis
+
+Dense and list-wise search distillation move many logits even when the accepted model already agrees with search. A reference-anchored pairwise objective based on [Direct Preference Optimization](https://arxiv.org/abs/2305.18290) can instead update only positions where 64-visit search selects a different top move. The preferred-versus-rejected logit margin is measured relative to the exact incumbent, limiting unnecessary policy drift.
+
+The experimental loss ignored agreement rows. On disagreement rows, the search winner was preferred and the exact incumbent's top move was rejected. A regression test verified that an unchanged policy produced the expected log-two loss and that increasing only the incumbent-relative preferred margin reduced it.
+
+### Exact-INT8 experiment
+
+Seeds 113, 114, and 115 started from the exact dequantized accepted artifact. They used one quantization-aware epoch at learning rate 0.000002, preference beta 1.0, preference weight 1.0, policy-preservation weight 0.25, the second accepted-search corpus, the first accepted-search corpus as replay, and the 20,000-position browser replay set.
+
+Their second-round search test losses were 2.0565, 2.0538, and 2.0541. Top-move agreements were 70.4%, 70.4%, and 70.1%. Every export remained exactly 111,920 bytes.
+
+On 20 fresh exact-INT8 games from opening offset 2,360,000:
+
+| Artifact  | Wins | Caps | Black | White |
+| --------- | ---: | ---: | ----: | ----: |
+| Incumbent |    8 |    0 |     3 |     5 |
+| Seed 113  |    7 |    0 |     4 |     3 |
+| Seed 114  |    8 |    0 |     4 |     4 |
+| Seed 115  |    7 |    0 |     3 |     4 |
+
+No seed improved wins, so none advanced. The preference-training branch was removed after rejection. The accepted player, checkpoint, and INT8 artifact are unchanged. No website files were touched.
