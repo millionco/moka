@@ -4169,3 +4169,45 @@ Full consensus improved every block by eight, two, and six games, adding 16 wins
 The repository intentionally uses simple ko to match the b6c96 teacher configuration. The three-block audit contained one canonical and two consensus repetition caps. Canonical Moka received one area-adjudicated cap win; both consensus caps were Moka losses. The strength gain therefore did not come from cap adjudication or teacher information.
 
 Full descendant symmetry consensus is accepted as the default research search player. `--no-symmetry-ensemble` provides the canonical control. The default propagates through arena play and future search-data collection. The 64-visit budget, 104,129 parameters, 111,920-byte browser artifact, and model digest remain unchanged. The Million website remains unchanged.
+
+## 2026-07-28 — Full-symmetry search calibration
+
+### Value weight
+
+The accepted value weight was re-audited because all earlier calibration used canonical descendants. On 20 fresh full-symmetry games from opening offset 3,710,000:
+
+| Value weight | Wins | Black | White | Caps |
+| -----------: | ---: | ----: | ----: | ---: |
+|         1.00 |    6 |     3 |     3 |    0 |
+|         1.25 |   10 |     5 |     5 |    0 |
+|         1.50 |    8 |     4 |     4 |    0 |
+
+The accepted 1.25 remained the unique winner and was retained.
+
+### Exploration
+
+On 20 fresh games from opening offset 3,720,000, exploration 1.5 won 13 games, accepted 2.0 won nine, and 2.5 won five. All had zero caps. Exploration 1.5 advanced as the unique screen winner.
+
+On 100 untouched paired games from opening offset 3,730,000, accepted exploration 2.0 won 54 games, split 28 Black and 26 White, in 299.2 seconds. Candidate 1.5 won 43, split 27 Black and 16 White, in 303.6 seconds. Both had zero caps. The screen gain reversed by 11 games, so exploration 1.5 is rejected and 2.0 remains accepted.
+
+### First-play urgency
+
+On 20 fresh games from opening offset 3,740,000:
+
+| FPU reduction | Wins | Black | White | Caps |
+| ------------: | ---: | ----: | ----: | ---: |
+|          0.00 |    6 |     3 |     3 |    0 |
+|          0.25 |   10 |     6 |     4 |    0 |
+|          0.50 |   11 |     4 |     7 |    0 |
+
+Reduction 0.5 advanced as the unique screen winner. Two untouched paired 100-game blocks produced:
+
+| Opening offset | FPU 0.25 wins | FPU 0.50 wins | FPU 0.25 Black / White | FPU 0.50 Black / White |      Caps |
+| -------------: | ------------: | ------------: | :--------------------- | :--------------------- | --------: |
+|      3,750,000 |            44 |            52 | 20 / 24                | 26 / 26                |     0 / 0 |
+|      3,760,000 |            39 |            44 | 23 / 16                | 24 / 20                |     0 / 0 |
+|      **Total** |        **83** |        **96** | **43 / 40**            | **50 / 46**            | **0 / 0** |
+
+FPU reduction 0.5 improved both blocks by eight and five games, adding 13 wins in aggregate without a cap regression. Runtime fell from 611.1 to 590.2 seconds, a 3.4% improvement.
+
+FPU reduction 0.5 is accepted. The full-symmetry evaluator, exploration 2.0, value weight 1.25, 64-visit budget, model parameters, browser artifact, and model digest remain unchanged. The Million website remains unchanged.

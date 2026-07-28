@@ -68,7 +68,7 @@ class SearchTest(unittest.TestCase):
 
         self.assertEqual(arguments.simulations, 64)
         self.assertEqual(arguments.search_exploration, 2.0)
-        self.assertEqual(arguments.search_fpu_reduction, 0.25)
+        self.assertEqual(arguments.search_fpu_reduction, 0.5)
         self.assertEqual(arguments.resignation_area_margin, 60.0)
         self.assertTrue(arguments.symmetry_ensemble)
         self.assertTrue(arguments.root_symmetry_ensemble)
