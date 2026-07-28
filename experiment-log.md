@@ -4211,3 +4211,49 @@ Reduction 0.5 advanced as the unique screen winner. Two untouched paired 100-gam
 FPU reduction 0.5 improved both blocks by eight and five games, adding 13 wins in aggregate without a cap regression. Runtime fell from 611.1 to 590.2 seconds, a 3.4% improvement.
 
 FPU reduction 0.5 is accepted. The full-symmetry evaluator, exploration 2.0, value weight 1.25, 64-visit budget, model parameters, browser artifact, and model digest remain unchanged. The Million website remains unchanged.
+
+## 2026-07-28 — Local full-symmetry coefficient refinement
+
+### Screens
+
+The accepted full-symmetry search was refined locally without combining unconfirmed changes. Each screen used 20 fresh games, the exact accepted INT8 artifact, 64 visits, exploration 2.0, value weight 1.25, FPU reduction 0.5, and full descendant symmetry except for the coefficient under test.
+
+On opening offset 3,780,000:
+
+| FPU reduction | Wins | Black | White | Caps |
+| ------------: | ---: | ----: | ----: | ---: |
+|         0.375 |    7 |     5 |     2 |    0 |
+|         0.500 |    9 |     5 |     4 |    0 |
+|         0.625 |   10 |     5 |     5 |    0 |
+
+On opening offset 3,790,000:
+
+| Exploration | Wins | Black | White | Caps |
+| ----------: | ---: | ----: | ----: | ---: |
+|        1.75 |   11 |     6 |     5 |    0 |
+|        2.00 |    7 |     3 |     4 |    0 |
+|        2.25 |    5 |     3 |     2 |    0 |
+
+On opening offset 3,800,000:
+
+| Value weight | Wins | Black | White | Caps |
+| -----------: | ---: | ----: | ----: | ---: |
+|        1.125 |   10 |     5 |     5 |    0 |
+|        1.250 |    9 |     5 |     4 |    0 |
+|        1.375 |    7 |     5 |     2 |    0 |
+
+Exploration 1.75 had the largest screen gain and advanced first. FPU 0.625 and value weight 1.125 were the remaining unique screen leaders.
+
+### Paired confirmations
+
+Each challenger played the same 100 deterministic openings as its accepted control:
+
+| Opening offset | Coefficient        | Control wins | Candidate wins | Control Black / White | Candidate Black / White | Control / candidate caps |
+| -------------: | :----------------- | -----------: | -------------: | :-------------------- | :---------------------- | -----------------------: |
+|      3,810,000 | Exploration 1.75   |           51 |             46 | 31 / 20               | 29 / 17                 |                    0 / 0 |
+|      3,820,000 | FPU 0.625          |           46 |             43 | 25 / 21               | 22 / 21                 |                    0 / 0 |
+|      3,830,000 | Value weight 1.125 |           46 |             44 | 22 / 24               | 21 / 23                 |                    0 / 0 |
+
+All three screen gains reversed on their untouched confirmations. Exploration 1.75 lost five games, FPU 0.625 lost three, and value weight 1.125 lost two. No run reached the move cap, so cap adjudication cannot explain the result.
+
+Exploration 2.0, FPU reduction 0.5, and value weight 1.25 remain accepted. The checkpoint, browser artifact, and Million website remain unchanged.
