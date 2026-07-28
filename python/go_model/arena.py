@@ -27,6 +27,8 @@ from go_model.config import (
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
     SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY,
     SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
+    SEARCH_LATE_SIMULATION_COUNT,
+    SEARCH_LATE_SIMULATION_START_MOVE_COUNT,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
@@ -71,6 +73,21 @@ def create_opening_game_state(game_index: int, opening_offset: int) -> GameState
         game_state = next_state
 
     return game_state
+
+
+def get_search_simulation_count(
+    game_state: GameState,
+    simulation_count: int,
+    late_simulation_count: int,
+    late_simulation_start_move_count: int,
+) -> int:
+    if (
+        late_simulation_count > 0
+        and game_state.move_count >= late_simulation_start_move_count
+    ):
+        return late_simulation_count
+
+    return simulation_count
 
 
 def select_moka_move(
@@ -195,6 +212,10 @@ def run_arena(
     ),
     root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
     root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
+    late_simulation_count: int = SEARCH_LATE_SIMULATION_COUNT,
+    late_simulation_start_move_count: int = (
+        SEARCH_LATE_SIMULATION_START_MOVE_COUNT
+    ),
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -324,12 +345,18 @@ def run_arena(
             )
             seen_position_keys.add(position_key)
             is_moka_turn = (game_state.next_color == 1) == is_moka_black
+            turn_simulation_count = get_search_simulation_count(
+                game_state,
+                simulation_count,
+                late_simulation_count,
+                late_simulation_start_move_count,
+            )
             move = (
                 select_moka_move(
                     model,
                     evaluator,
                     game_state,
-                    simulation_count,
+                    turn_simulation_count,
                     lookahead_candidate_count,
                     use_context_network,
                     rollout_candidate_count,
@@ -395,6 +422,16 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=ARENA_DEFAULT_GAME_COUNT,
     )
     argument_parser.add_argument("--simulations", type=int, default=0)
+    argument_parser.add_argument(
+        "--late-simulations",
+        type=int,
+        default=SEARCH_LATE_SIMULATION_COUNT,
+    )
+    argument_parser.add_argument(
+        "--late-simulation-start-move",
+        type=int,
+        default=SEARCH_LATE_SIMULATION_START_MOVE_COUNT,
+    )
     argument_parser.add_argument(
         "--search-exploration",
         type=float,
@@ -535,6 +572,8 @@ def main() -> None:
         arguments.search_fpu_root_only,
         arguments.root_branches,
         arguments.root_policy_temperature,
+        arguments.late_simulations,
+        arguments.late_simulation_start_move,
     )
 
 

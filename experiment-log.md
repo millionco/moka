@@ -2042,3 +2042,41 @@ Two disjoint 100-game blocks compared deployed 28 visits with the 40-visit candi
 After conservatively excluding the cap-awarded result, 40 visits won 66 completed games versus 58 for 28 visits. Caps fell from 18 to 11. Runtime rose from 267.7 to 399.0 seconds across the 200 games.
 
 Forty visits is accepted for the browser. It changes neither model weights nor download size and remains behind the existing interaction-only search gate.
+
+## 2026-07-28 — Search budgets above forty visits
+
+### Budget screen
+
+The corrected one-leaf topology, root symmetry, exploration 2.0, FPU 0.25, full branching, and unchanged browser checkpoint were held fixed. On 20 fresh games from opening offset 1,490,000, budgets 40, 48, 56, 64, and 80 scored six, seven, ten, eleven, and nine wins. Their cap counts were one, two, one, zero, and one.
+
+Sixty-four visits was frozen as the screen winner. It split its eleven wins as four Black and seven White, and every win completed normally.
+
+### Sixty-four-visit confirmation
+
+Two disjoint 100-game blocks compared the frozen 64-visit candidate with the deployed 40-visit search:
+
+| Opening offset | 40 visits | 40 caps | 64 visits | 64 caps |
+| -------------: | --------: | ------: | --------: | ------: |
+|      1,500,000 |        35 |       7 |        41 |       4 |
+|      1,510,000 |        40 |       5 |        39 |       9 |
+|      **Total** |    **75** |  **12** |    **80** |  **13** |
+
+Every win completed normally. Sixty-four visits added five completed wins but increased caps by one, so it failed the predeclared no-cap-regression gate and was rejected.
+
+### Late-budget schedule
+
+A research-only schedule allowed a higher early budget to return to 40 visits after a move-count cutoff. Regression tests cover the disabled and active scheduling paths.
+
+On 20 new games from offset 1,520,000, fixed 40 visits scored ten wins with one cap. Fixed 64 visits and 64-to-40 schedules beginning at moves 40, 60, and 80 each scored nine wins with one cap. The phase schedule lost a completed game and was rejected.
+
+### Fifty-six-visit fallback
+
+The predeclared screen runner-up was evaluated on the same two 100-game confirmation blocks:
+
+| Opening offset | 40 visits | 40 caps | 56 visits | 56 caps |
+| -------------: | --------: | ------: | --------: | ------: |
+|      1,500,000 |        35 |       7 |        39 |       8 |
+|      1,510,000 |        40 |       5 |        37 |       4 |
+|      **Total** |    **75** |  **12** |    **76** |  **12** |
+
+Every win completed normally. Fifty-six visits added one completed win without increasing caps, model bytes, or browser payload. It is accepted for browser validation.

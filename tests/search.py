@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from go_model.arena import get_search_simulation_count
 from go_model.board import GameState, play_move
 from go_model.config import POLICY_MOVE_COUNT
 from go_model.search import (
@@ -28,6 +29,25 @@ class UniformEvaluator:
 
 
 class SearchTest(unittest.TestCase):
+    def test_late_search_simulation_count_only_applies_after_cutoff(self) -> None:
+        early_game_state = GameState(move_count=59)
+        late_game_state = GameState(move_count=60)
+
+        self.assertEqual(
+            get_search_simulation_count(early_game_state, 64, 40, 60),
+            64,
+        )
+        self.assertEqual(
+            get_search_simulation_count(late_game_state, 64, 40, 60),
+            40,
+        )
+
+    def test_disabled_late_search_keeps_base_simulation_count(self) -> None:
+        self.assertEqual(
+            get_search_simulation_count(GameState(move_count=80), 64, 0, 60),
+            64,
+        )
+
     def test_batched_search_preserves_requested_visit_count(self) -> None:
         evaluator = UniformEvaluator()
         root = SearchNode(GameState(), 1)
