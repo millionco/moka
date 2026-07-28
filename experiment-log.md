@@ -3549,3 +3549,84 @@ Two disjoint 100-game blocks compared the frozen candidate with production:
 The candidate regressed on both blocks, lost eight completed games, and introduced one losing move cap. Temperature 1.05 is rejected.
 
 Moka retains root-policy temperature 1.0 and FPU reduction 0.25. The accepted search, model artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Equal-budget deep selective reanalysis
+
+### Hypothesis
+
+KataGo's training methods allocate expensive search to surprising positions rather than using the same shallow budget everywhere. The accepted selective-regret collector already chooses 25% of Moka turns, but its b18 labels used 64 visits. This experiment held total teacher visits approximately constant while trading four times fewer roots for four times deeper labels.
+
+The exact accepted artifact generated 64 Moka-versus-b6 games from opening offset 3,200,000. Moka used its accepted 64-visit search. Only Moka turns were eligible, half of the selected turns were uniform, half were highest b6 action regret, and b18 analyzed every selected root at 256 visits.
+
+The corpus contains 536 roots in 64 games and occupies 287,478 compressed bytes. Its SHA-256 is `fa448fcf90384557042511a72b734c5ee47259a56388147f33e95771c740a8c8`.
+
+Compared with the 64-visit round-two corpus, deeper labels increased searched-action coverage from 84.3% to 89.4% and material-regret density:
+
+| Minimum b18 regret | Roots | Fraction |
+| -----------------: | ----: | -------: |
+|               0.05 |    82 |   15.30% |
+|               0.10 |    70 |   13.06% |
+|               0.20 |    55 |   10.26% |
+|               0.40 |    31 |    5.78% |
+|               0.80 |    12 |    2.24% |
+
+Moka selected b18's top move on 37.9% of roots. The critical archive has SHA-256 `61e142d0cba194df096d7216bdbd7a1988b19edf08d235d6c770037680e22a3f`. It contains 54 material roots across 32 games: 46 train, six validation, and two test roots.
+
+### Conservative policy-linear QAT
+
+Seeds 177, 178, and 179 used the accepted policy-only recipe: one epoch, learning rate 0.000020, eightfold critical replay, both accepted search corpora once, frozen trunk and policy convolution, INT8-aware forward passes, and policy preservation weight 0.25.
+
+All exact exports remained 111,920 bytes. On 20 fresh games from opening offset 2,820,000, the incumbent and every candidate scored seven wins with five Black and two White wins and zero caps. No conservative candidate advanced.
+
+### Stronger policy-linear QAT
+
+A predeclared bounded follow-up increased only the learning rate to 0.000050. Seeds 181, 182, and 183 retained the same data, replay, preservation, frozen tensors, epoch count, and exact INT8 path.
+
+The exact exports remained 111,920 bytes. Their SHA-256 values were:
+
+| Seed | SHA-256                                                            |
+| ---: | :----------------------------------------------------------------- |
+|  181 | `9b2349b2fa9de83b8075a6aa6749ec09c4c6becf2aa279ea6801788590385614` |
+|  182 | `db75be8dc188463beb78fd2b699aa86d8e63cadc1bb225838a985877b5e52e6f` |
+|  183 | `4353b046175ccd7cae8136aa687e9d18d5b2a80e17cabd29f42c61c6cd942d86` |
+
+On 20 fresh games from opening offset 2,830,000:
+
+| Player    | Wins | Black | White | Caps |
+| :-------- | ---: | ----: | ----: | ---: |
+| Incumbent |   10 |     5 |     5 |    0 |
+| Seed 181  |    9 |     4 |     5 |    0 |
+| Seed 182  |   11 |     6 |     5 |    0 |
+| Seed 183  |    6 |     4 |     2 |    0 |
+
+Seed 182 was frozen as the unique leader.
+
+### Standalone confirmation
+
+Two fresh 100-game blocks compared frozen seed 182 with the incumbent:
+
+| Opening offset | Incumbent wins | Candidate wins | Incumbent caps | Candidate caps |
+| -------------: | -------------: | -------------: | -------------: | -------------: |
+|      2,840,000 |             41 |             43 |              0 |              1 |
+|      2,850,000 |             44 |             48 |              0 |              0 |
+|      **Total** |         **85** |         **91** |          **0** |          **1** |
+
+The candidate improved both blocks and added six completed wins, but introduced one losing cap. The trace showed Moka repeatedly selecting pass while behind 55 points, just below the accepted 60-point resignation threshold. Seed 182 failed the predeclared no-cap-regression gate and was not promoted.
+
+### Separate resignation composite
+
+Prior evidence showed that resignation margins 40 and 60 preserved outcomes while the lower threshold ended one additional hopeless game. A new composite candidate paired frozen seed 182 with the minimal 55-point margin.
+
+On 20 fresh games from opening offset 2,860,000, the incumbent scored seven wins. Seed 182 scored eight at both margins 60 and 55, with identical colors, passes, resignations, and zero caps. Margin 55 therefore did not manufacture the screen gain.
+
+The frozen composite then played two new 100-game blocks:
+
+| Opening offset | Incumbent wins | Composite wins | Incumbent caps | Composite caps |
+| -------------: | -------------: | -------------: | -------------: | -------------: |
+|      2,870,000 |             44 |             42 |              0 |              1 |
+|      2,880,000 |             46 |             45 |              0 |              0 |
+|      **Total** |         **90** |         **87** |          **0** |          **1** |
+
+The composite regressed on both fresh blocks and produced a different losing repetition cap. Seed 182, margin 55, and the deep-critical training branch are rejected.
+
+Deeper selective reanalysis increased target coverage and material-regret density at equal teacher-visit cost, but sparse policy-linear QAT did not convert that offline signal into reproducible playing strength. The accepted artifact remains SHA-256 `5d38b3d3f88582212065e6d2aee7b5d638c13e3c4ccaf9e1cab1cd341f757714`, 111,920 bytes. The accepted search and Million website remain unchanged.
