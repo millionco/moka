@@ -2648,3 +2648,47 @@ Two untouched 100-game blocks produced:
 |      **Total** |         **79** |          **0** |     **74** |      **0** |
 
 The first-block gain reversed on the second block. The blend lost five games in aggregate and is rejected. Neither a second full distillation step nor partial interpolation compounds the accepted first-round checkpoint.
+
+## 2026-07-28 — Hard-mixture round-two distillation
+
+### Hypothesis
+
+The repeated dense objective improved loss without strength. Mixing 25% of the 64-visit target's top move with 75% of its dense distribution might emphasize decisive search choices while preserving secondary-action information.
+
+Seeds 84, 85, and 86 used the same round-two full-network recipe, corpora, preservation reference, and learning rate as the rejected dense continuation. Only the hard-target weight changed from zero to 0.25.
+
+All three candidates passed the offline gate. Round-two test loss improved from 2.0614 to 2.0063–2.0102. Top-move agreement remained 70.6%–71.0% versus 70.8%, and replay top-move agreement increased from 55.0% to 55.4%–55.8%.
+
+On 20 fresh games from opening offset 2,050,000:
+
+| Checkpoint | Wins | Caps | Resignations |
+| ---------- | ---: | ---: | -----------: |
+| Incumbent  |    7 |    0 |            1 |
+| Seed 84    |    6 |    0 |            0 |
+| Seed 85    |    7 |    0 |            1 |
+| Seed 86    |    6 |    0 |            1 |
+
+No seed improved wins. The hard-mixture branch is rejected without confirmation. Dense loss, hard-target agreement, and replay agreement all remain insufficient proxies for search strength.
+
+## 2026-07-28 — Isolated value-head correction
+
+### Hypothesis
+
+The accepted full-network update improved both policy and value, while repeated full-network updates improved offline metrics but regressed in play. Fitting only the value head to fresh accepted-player roots would preserve policy logits exactly and test whether search benefits from better pointwise values without policy drift.
+
+The two 128-game search corpora were combined by complete game into 8,737 roots. The combined archive had SHA-256 `a48ee16a9a0ab3767a8bc5b622feecf97ec9bcad5519899b0199ea56d44c9a28`.
+
+Seeds 87, 88, and 89 trained only the existing value convolution, hidden layer, and output for ten epochs at learning rate 0.0001. Tensor comparison confirmed that every trunk and policy parameter remained exactly equal to the incumbent.
+
+The incumbent's combined test value MAE was 0.4143. Candidate MAEs were 0.3134, 0.3096, and 0.3094.
+
+On 20 fresh games from opening offset 2,060,000:
+
+| Checkpoint | Wins | Caps | Resignations |
+| ---------- | ---: | ---: | -----------: |
+| Incumbent  |    8 |    0 |            0 |
+| Seed 87    |    8 |    0 |            0 |
+| Seed 88    |    6 |    0 |            0 |
+| Seed 89    |    7 |    0 |            0 |
+
+No value head improved wins, so none advanced. A roughly 25% reduction in pointwise value MAE did not improve search strength. Future value work must target action-relative ordering or search dynamics rather than another pointwise fit.
