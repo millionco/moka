@@ -1943,3 +1943,31 @@ On 20 fresh games from opening offset 1,370,000, the unrestricted control scored
 More aggressive caps of two, four, and six scored four, four, and three wins. Their cap counts were zero, four, and three. None received a cap-awarded win.
 
 The measured search already concentrated its visits within the top eight root priors, making wider caps behaviorally inert. Narrower caps removed useful alternatives and lost completed games. Explicit root branch pruning was rejected.
+
+## 2026-07-28 — Search-specific list-wise continuation
+
+### Protocol
+
+The earlier generic list-wise experiment ranked KataGo's preferred moves on broad teacher positions. The earlier search-distillation experiment fit marginal cross-entropy on Moka's own 28-visit targets. This experiment combined the missing pieces: a Plackett–Luce top-eight ranking loss on the 9,702 Moka-turn search corpus from opening offset 1,000,000.
+
+The nested trunk and value head remained frozen. Three policy-head seeds used two epochs at learning rate 0.00001, list-wise weight 0.1, the existing 20,000-position browser on-policy corpus as preservation replay, and a 0.25 logit-preservation penalty.
+
+Seeds 53, 54, and 55 reached 78.2%, 78.2%, and 77.9% top-move agreement on the untouched test games. The starting checkpoint was 78.1%, so the static changes were within noise.
+
+### Fresh arena screen
+
+On 20 fresh games from opening offset 1,380,000, the incumbent scored eight wins with one cap. Seeds 53, 54, and 55 scored seven, six, and eight wins with three, five, and two caps. No configuration received a cap-awarded win.
+
+The only win-rate tie added a cap; the other seeds lost completed games. Search-specific list-wise continuation was rejected without confirmation.
+
+## 2026-07-28 — Parameter-free leaky activation
+
+### Protocol
+
+ReLU was replaced with leaky ReLU at slope 0.1 throughout the nested trunk and heads. The candidate retained exactly 104,129 parameters and identical tensor shapes, so it would not have added model weights or payload bytes.
+
+Loading the incumbent weights under the new activation changed outputs substantially. Three two-epoch calibration seeds therefore trained the full network at learning rate 0.00001 on the 100,000-position browser DAgger corpus, with the 20,000-position on-policy preservation replay, 50% hard policy targets, and a 0.25 penalty against the incumbent logits.
+
+The short runs reached only 44.1%–44.4% top-move agreement on untouched test games, versus 55.2% for the incumbent. A single predeclared 12-epoch recovery run improved steadily to 54.3% agreement. Its value MAE improved from the incumbent's 0.2892 to 0.2627, but policy agreement remained below the required recovery baseline.
+
+The activation candidate failed the offline gate and was never evaluated on arena openings. Its implementation was removed rather than retaining an unpromoted runtime branch.
