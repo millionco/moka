@@ -76,12 +76,17 @@ def create_child_value_pairs(
     child_values = dataset["child_values"].astype(np.float32)
     child_weights = dataset["child_weights"].astype(np.float32)
     child_game_ids = dataset["child_game_ids"]
+    root_value_key = (
+        "q_values"
+        if "q_values" in dataset
+        else "search_q_values"
+    )
     child_root_indexes = (
         dataset["child_root_indexes"]
         if "child_root_indexes" in dataset
         else np.repeat(
-            np.arange(len(dataset["q_values"])),
-            np.count_nonzero(dataset["q_values"], axis=1),
+            np.arange(len(dataset[root_value_key])),
+            np.count_nonzero(dataset[root_value_key], axis=1),
         )
     )
 
@@ -95,7 +100,7 @@ def create_child_value_pairs(
     target_value_gaps: list[float] = []
     pair_weights: list[float] = []
     pair_game_ids: list[int] = []
-    for root_index in range(len(dataset["q_values"])):
+    for root_index in range(len(dataset[root_value_key])):
         child_start = int(
             np.searchsorted(child_root_indexes, root_index, side="left")
         )

@@ -23,7 +23,7 @@ from go_model.config import (
 )
 from go_model.features import encode_moka_features
 from go_model.model import create_moka_network
-from go_model.search import MokaEvaluator, MokaSearchSession
+from go_model.search import MokaEvaluator, MokaSearchSession, SearchNode
 from go_model.teacher import KataGoTeacher
 
 
@@ -51,6 +51,20 @@ def create_search_q_policy(
     return q_policy
 
 
+def get_visited_child_value_targets(
+    root: SearchNode,
+) -> list[tuple[np.ndarray, float, float]]:
+    return [
+        (
+            encode_moka_features(child.game_state),
+            child.mean_value,
+            float(child.visit_count),
+        )
+        for child in root.children.values()
+        if child.visit_count > 0
+    ]
+
+
 def collect_search_distillation_dataset(
     checkpoint_path: Path,
     teacher_path: Path,
@@ -72,6 +86,7 @@ def collect_search_distillation_dataset(
     resignation_area_margin_points: float = (
         SEARCH_RESIGNATION_AREA_MARGIN_POINTS
     ),
+    should_collect_child_value_targets: bool = False,
 ) -> dict[str, np.ndarray]:
     if not 0 <= search_policy_blend <= 1:
         raise ValueError("Search policy blend must be between zero and one.")
@@ -94,6 +109,11 @@ def collect_search_distillation_dataset(
     sample_weights: list[float] = []
     search_q_values: list[np.ndarray] = []
     search_q_weights: list[np.ndarray] = []
+    child_features: list[np.ndarray] = []
+    child_values: list[float] = []
+    child_weights: list[float] = []
+    child_game_ids: list[int] = []
+    child_root_indexes: list[int] = []
     root_evaluator = (
         MokaEvaluator(model, use_symmetry_ensemble=True)
         if use_root_symmetry_ensemble
@@ -118,6 +138,7 @@ def collect_search_distillation_dataset(
             is_moka_turn = (game_state.next_color == 1) == is_moka_black
 
             if is_moka_turn:
+                searched_root = search_session.align_root(game_state)
                 root_policy = (
                     root_evaluator.evaluate(game_state)[0]
                     if root_evaluator is not None
@@ -157,6 +178,19 @@ def collect_search_distillation_dataset(
                         search_policy_blend * target_policy
                         + (1 - search_policy_blend) * legal_root_policy
                     )
+                if should_collect_child_value_targets:
+                    root_index = len(features)
+
+                    for (
+                        child_feature,
+                        child_value,
+                        child_weight,
+                    ) in get_visited_child_value_targets(searched_root):
+                        child_features.append(child_feature)
+                        child_values.append(child_value)
+                        child_weights.append(child_weight)
+                        child_game_ids.append(game_id)
+                        child_root_indexes.append(root_index)
             else:
                 move = select_greedy_rollout_move(game_state, teacher_policy)
                 target_policy = teacher_policy
@@ -199,7 +233,7 @@ def collect_search_distillation_dataset(
                 f"positions={len(features):,}"
             )
 
-    return {
+    dataset = {
         "features": np.asarray(features, dtype=np.float16),
         "game_ids": np.asarray(game_ids, dtype=np.int32),
         "policies": np.asarray(policies, dtype=np.float16),
@@ -208,6 +242,32 @@ def collect_search_distillation_dataset(
         "search_q_weights": np.asarray(search_q_weights, dtype=np.float16),
         "values": np.asarray(values, dtype=np.float16),
     }
+    if should_collect_child_value_targets:
+        dataset.update(
+            {
+                "child_features": np.asarray(
+                    child_features,
+                    dtype=np.float16,
+                ),
+                "child_game_ids": np.asarray(
+                    child_game_ids,
+                    dtype=np.int32,
+                ),
+                "child_root_indexes": np.asarray(
+                    child_root_indexes,
+                    dtype=np.int32,
+                ),
+                "child_values": np.asarray(
+                    child_values,
+                    dtype=np.float16,
+                ),
+                "child_weights": np.asarray(
+                    child_weights,
+                    dtype=np.float16,
+                ),
+            }
+        )
+    return dataset
 
 
 def create_argument_parser() -> argparse.ArgumentParser:
@@ -290,6 +350,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
     )
+    argument_parser.add_argument(
+        "--child-value-targets",
+        action="store_true",
+    )
     return argument_parser
 
 
@@ -312,6 +376,7 @@ def main() -> None:
         arguments.search_exploration,
         arguments.search_fpu_reduction,
         arguments.resignation_area_margin,
+        arguments.child_value_targets,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)

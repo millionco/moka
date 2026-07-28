@@ -7,6 +7,26 @@ from go_model.value import create_child_value_pairs
 
 
 class ChildValuePairTest(unittest.TestCase):
+    def test_pairs_accept_search_collector_q_values(self) -> None:
+        dataset = {
+            "child_values": np.asarray([-0.5, 0.25], dtype=np.float32),
+            "child_weights": np.asarray([4, 2], dtype=np.float32),
+            "child_game_ids": np.asarray([7, 7]),
+            "child_root_indexes": np.asarray([0, 0]),
+            "search_q_values": np.zeros(
+                (1, POLICY_MOVE_COUNT),
+                dtype=np.float32,
+            ),
+        }
+
+        preferred_indexes, alternative_indexes, gaps, _, _ = (
+            create_child_value_pairs(dataset)
+        )
+
+        np.testing.assert_array_equal(preferred_indexes, [0])
+        np.testing.assert_array_equal(alternative_indexes, [1])
+        np.testing.assert_allclose(gaps, [0.75])
+
     def test_pairs_rank_lowest_child_value_as_root_preference(self) -> None:
         q_values = np.zeros((2, POLICY_MOVE_COUNT), dtype=np.float32)
         q_values[0, :3] = [0.2, 0.5, -0.4]

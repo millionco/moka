@@ -2692,3 +2692,42 @@ On 20 fresh games from opening offset 2,060,000:
 | Seed 89    |    7 |    0 |            0 |
 
 No value head improved wins, so none advanced. A roughly 25% reduction in pointwise value MAE did not improve search strength. Future value work must target action-relative ordering or search dynamics rather than another pointwise fit.
+
+## 2026-07-28 — Accepted-search child-value ranking
+
+### Hypothesis
+
+Pointwise value correction reduced MAE without improving play. PUCT depends on relative action values, so training the value head to order siblings from the accepted 64-visit search might provide a better-aligned signal while preserving the policy and trunk exactly.
+
+### Collector and corpus
+
+The search collector gained an opt-in child-value path. For every visited root child it records:
+
+- the exact child-state Moka features;
+- the search child's mean value in the child player's perspective;
+- the visit count as confidence weight;
+- the complete-game ID and parent-root index.
+
+The pair builder accepts these search-collector arrays directly. Regression tests verify that unvisited children are excluded, child perspective is preserved, and parent groups form the intended low-opponent-value preference.
+
+The 128-game corpus from opening offset 2,080,000 contained 4,310 roots, 29,490 visited children, and 14,429 sibling comparisons with a minimum value gap of 0.1. Complete-game splits retained 11,429 training, 1,346 validation, and 1,654 test pairs. The archive SHA-256 was `cf436f72c196ef2761a484bc8c8a10ac64339c987e601714e6ee64d51fb50967`.
+
+### Training and offline gate
+
+Seeds 90, 91, and 92 trained only the six existing value-head tensors for ten epochs at learning rate 0.0001. Pointwise child-value loss and sibling-ranking loss had equal weight. Every policy and trunk tensor remained exactly equal to the incumbent.
+
+The incumbent's test pair MSE was 0.0788. Candidate pair MSEs were 0.0698, 0.0703, and 0.0699. Pointwise test MAE changed from 0.1705 to 0.1791, 0.1790, and 0.1764, an intentional trade toward ordering.
+
+### Arena result
+
+On 20 fresh games from opening offset 2,090,000, the incumbent scored eight wins. Seeds 90, 91, and 92 scored nine, ten, and ten, all with zero caps. Seed 92 was frozen using its best validation ranking checkpoint and lower pointwise test MAE among the tied screen winners.
+
+Two untouched 100-game blocks produced:
+
+| Opening offset | Incumbent wins | Incumbent caps | Seed 92 wins | Seed 92 caps |
+| -------------: | -------------: | -------------: | -----------: | -----------: |
+|      2,100,000 |             46 |              0 |           42 |            0 |
+|      2,110,000 |             44 |              0 |           46 |            0 |
+|      **Total** |         **90** |          **0** |       **88** |        **0** |
+
+The candidate improved the second block but regressed by four wins on the first, losing two games in aggregate. It is rejected. The child-target collector remains because the experiment is leakage-free and reproducible, but the accepted checkpoint and INT8 artifact are unchanged.

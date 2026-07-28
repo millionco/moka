@@ -20,7 +20,10 @@ from go_model.search import (
     run_search_simulations,
     select_child,
 )
-from go_model.search_collect import create_search_q_policy
+from go_model.search_collect import (
+    create_search_q_policy,
+    get_visited_child_value_targets,
+)
 
 
 class UniformEvaluator:
@@ -35,6 +38,28 @@ class UniformEvaluator:
 
 
 class SearchTest(unittest.TestCase):
+    def test_child_value_targets_keep_visited_child_perspective(
+        self,
+    ) -> None:
+        root = SearchNode(GameState(), 1)
+        visited_child = SearchNode(
+            GameState(next_color=-1),
+            0.6,
+            visit_count=4,
+            value_sum=-2,
+        )
+        root.children = {
+            0: visited_child,
+            1: SearchNode(GameState(), 0.4),
+        }
+
+        targets = get_visited_child_value_targets(root)
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0][0].shape, (9, 9, 12))
+        self.assertEqual(targets[0][1], -0.5)
+        self.assertEqual(targets[0][2], 4)
+
     def test_arena_defaults_match_accepted_search_player(self) -> None:
         arguments = create_argument_parser().parse_args(
             ["--checkpoint", "checkpoint.safetensors"],
