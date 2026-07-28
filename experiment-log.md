@@ -1925,3 +1925,21 @@ On the first 100-game confirmation block at opening offset 1,340,000, production
 On a second predeclared block at offset 1,350,000, production scored 30–70 with eight caps in 128.1 seconds. Adaptive search regressed to 25–75 with six caps in 151.8 seconds.
 
 Across 200 games, adaptive search lost two completed games, 58 versus 60, while reducing caps from 17 to ten and increasing runtime from 262.5 to 301.1 seconds. It was rejected.
+
+### Root-only first-play urgency
+
+Fixed FPU 0.25 was restricted to the real-move root while descendant nodes returned to the earlier absolute-zero treatment. This kept the model, root symmetry, 28-visit budget, exploration coefficient, and number of evaluations unchanged.
+
+On 20 fresh games from opening offset 1,360,000, the all-node FPU control scored six wins with three caps. Root-only FPU scored five wins with zero caps. Neither configuration received a cap-awarded win.
+
+The candidate reduced unfinished games but lost a completed game. It failed the strength gate and was rejected. The option remains available in the research arena for reproducibility, but the browser retains all-node FPU.
+
+### Root policy branch cap
+
+Ordinary PUCT was restricted at each real-move root to the highest-prior moves from Moka's symmetry-averaged policy. Descendant branching, FPU 0.25, exploration 2.0, and the 28-visit evaluation budget were unchanged.
+
+On 20 fresh games from opening offset 1,370,000, the unrestricted control scored six wins with three caps. Root caps of eight, 12, 16, 24, and 32 reproduced the control exactly, including colors, passes, caps, and capped-position counts.
+
+More aggressive caps of two, four, and six scored four, four, and three wins. Their cap counts were zero, four, and three. None received a cap-awarded win.
+
+The measured search already concentrated its visits within the top eight root priors, making wider caps behaviorally inert. Narrower caps removed useful alternatives and lost completed games. Explicit root branch pruning was rejected.

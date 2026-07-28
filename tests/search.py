@@ -8,6 +8,8 @@ from go_model.search import (
     MokaSearchSession,
     SearchNode,
     expand_node_with_evaluation,
+    prune_root_children,
+    resolve_first_play_urgency_reduction,
     run_search_simulations,
     select_child,
 )
@@ -110,6 +112,21 @@ class SearchTest(unittest.TestCase):
         self.assertIs(fixed_reduction_child, visited_child)
         self.assertIs(prior_mass_child, unvisited_child)
 
+    def test_first_play_urgency_can_apply_at_root_only(self) -> None:
+        root_reduction = resolve_first_play_urgency_reduction(
+            0.25,
+            True,
+            True,
+        )
+        descendant_reduction = resolve_first_play_urgency_reduction(
+            0.25,
+            True,
+            False,
+        )
+
+        self.assertEqual(root_reduction, 0.25)
+        self.assertEqual(descendant_reduction, -1.0)
+
     def test_opponent_branch_pruning_keeps_highest_policy_moves(self) -> None:
         starting_state = GameState()
         opponent_state = play_move(starting_state, 0)
@@ -142,6 +159,17 @@ class SearchTest(unittest.TestCase):
         )
 
         self.assertGreater(len(node.children), 1)
+
+    def test_root_branch_pruning_keeps_highest_policy_moves(self) -> None:
+        node = SearchNode(GameState(), 1)
+        node.children = {
+            move: SearchNode(GameState(), move / 10)
+            for move in range(5)
+        }
+
+        prune_root_children(node, 2)
+
+        self.assertEqual(list(node.children), [3, 4])
 
     def test_root_policy_temperature_sharpens_priors(self) -> None:
         policy = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)

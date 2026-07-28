@@ -25,11 +25,13 @@ from go_model.config import (
     SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
     SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
+    SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY,
     SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
+    SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
 )
@@ -188,6 +190,10 @@ def run_arena(
     use_first_play_urgency_prior_mass: bool = (
         SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
     ),
+    use_first_play_urgency_at_root_only: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
+    ),
+    root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
     root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
 ) -> tuple[int, int, int]:
     model = create_moka_network(
@@ -261,6 +267,10 @@ def run_arena(
                     use_first_play_urgency_prior_mass=(
                         use_first_play_urgency_prior_mass
                     ),
+                    use_first_play_urgency_at_root_only=(
+                        use_first_play_urgency_at_root_only
+                    ),
+                    root_branch_count=root_branch_count,
                     root_policy_temperature=root_policy_temperature,
                 )
                 if sequential_halving_candidate_count > 0
@@ -291,6 +301,10 @@ def run_arena(
                     use_first_play_urgency_prior_mass=(
                         use_first_play_urgency_prior_mass
                     ),
+                    use_first_play_urgency_at_root_only=(
+                        use_first_play_urgency_at_root_only
+                    ),
+                    root_branch_count=root_branch_count,
                     root_policy_temperature=root_policy_temperature,
                 )
             )
@@ -401,6 +415,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
     )
     argument_parser.add_argument(
+        "--search-fpu-root-only",
+        action="store_true",
+    )
+    argument_parser.add_argument(
         "--search-area-value-weight",
         type=float,
         default=SEARCH_AREA_VALUE_WEIGHT,
@@ -436,6 +454,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument(
         "--root-symmetry-ensemble",
         action="store_true",
+    )
+    argument_parser.add_argument(
+        "--root-branches",
+        type=int,
+        default=SEARCH_ROOT_BRANCH_COUNT,
     )
     argument_parser.add_argument(
         "--root-policy-temperature",
@@ -509,6 +532,8 @@ def main() -> None:
         arguments.root_self_atari_prior_penalty,
         arguments.search_fpu_reduction,
         arguments.search_fpu_prior_mass,
+        arguments.search_fpu_root_only,
+        arguments.root_branches,
         arguments.root_policy_temperature,
     )
 

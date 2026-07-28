@@ -25,12 +25,14 @@ from go_model.config import (
     SEARCH_AREA_VALUE_RAMP_MOVE_COUNT,
     SEARCH_AREA_VALUE_WEIGHT,
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
+    SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY,
     SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_POLICY_EPSILON,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
+    SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_SEQUENTIAL_HALVING_REDUCTION_FACTOR,
     SEARCH_SIMULATION_BATCH_SIZE,
@@ -413,6 +415,27 @@ def adjust_root_tactical_priors(
             child.prior /= adjusted_prior_sum
 
 
+def prune_root_children(
+    root: SearchNode,
+    root_branch_count: int,
+) -> None:
+    if root_branch_count <= 0 or len(root.children) <= root_branch_count:
+        return
+
+    retained_moves = set(
+        sorted(
+            root.children,
+            key=lambda move: root.children[move].prior,
+            reverse=True,
+        )[:root_branch_count]
+    )
+    root.children = {
+        move: child
+        for move, child in root.children.items()
+        if move in retained_moves
+    }
+
+
 def apply_search_policy_temperature(
     policy: np.ndarray,
     temperature: float,
@@ -489,6 +512,18 @@ def select_child(
     )
 
 
+def resolve_first_play_urgency_reduction(
+    first_play_urgency_reduction: float,
+    use_first_play_urgency_at_root_only: bool,
+    is_root: bool,
+) -> float:
+    return (
+        first_play_urgency_reduction
+        if is_root or not use_first_play_urgency_at_root_only
+        else -1.0
+    )
+
+
 def run_simulation(
     node: SearchNode,
     evaluator: MokaEvaluator,
@@ -504,6 +539,10 @@ def run_simulation(
     use_first_play_urgency_prior_mass: bool = (
         SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
     ),
+    use_first_play_urgency_at_root_only: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
+    ),
+    is_root: bool = True,
 ) -> float:
     if is_game_over(node.game_state):
         value = get_terminal_value(node.game_state)
@@ -534,7 +573,13 @@ def run_simulation(
             node,
             exploration=exploration,
             value_weight=value_weight,
-            first_play_urgency_reduction=first_play_urgency_reduction,
+            first_play_urgency_reduction=(
+                resolve_first_play_urgency_reduction(
+                    first_play_urgency_reduction,
+                    use_first_play_urgency_at_root_only,
+                    is_root,
+                )
+            ),
             use_first_play_urgency_prior_mass=(
                 use_first_play_urgency_prior_mass
             ),
@@ -550,6 +595,8 @@ def run_simulation(
             opponent_branch_count,
             first_play_urgency_reduction,
             use_first_play_urgency_prior_mass,
+            use_first_play_urgency_at_root_only,
+            False,
         )
 
     node.visit_count += 1
@@ -573,6 +620,9 @@ def run_simulation_batch(
     use_first_play_urgency_prior_mass: bool = (
         SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
     ),
+    use_first_play_urgency_at_root_only: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
+    ),
 ) -> None:
     reservation_counts: dict[int, int] = {}
     search_paths: list[list[SearchNode]] = []
@@ -587,7 +637,11 @@ def run_simulation_batch(
                 reservation_counts,
                 exploration,
                 value_weight,
-                first_play_urgency_reduction,
+                resolve_first_play_urgency_reduction(
+                    first_play_urgency_reduction,
+                    use_first_play_urgency_at_root_only,
+                    node is root,
+                ),
                 use_first_play_urgency_prior_mass,
             )
             search_path.append(node)
@@ -687,6 +741,9 @@ def run_search_simulations(
     use_first_play_urgency_prior_mass: bool = (
         SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
     ),
+    use_first_play_urgency_at_root_only: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
+    ),
 ) -> None:
     remaining_simulation_count = simulation_count
 
@@ -702,6 +759,7 @@ def run_search_simulations(
             opponent_branch_count,
             first_play_urgency_reduction,
             use_first_play_urgency_prior_mass,
+            use_first_play_urgency_at_root_only,
         )
         remaining_simulation_count -= 1
 
@@ -722,6 +780,7 @@ def run_search_simulations(
             opponent_branch_count,
             first_play_urgency_reduction,
             use_first_play_urgency_prior_mass,
+            use_first_play_urgency_at_root_only,
         )
         remaining_simulation_count -= batch_simulation_count
 
@@ -740,6 +799,9 @@ def select_search_move(
     use_first_play_urgency_prior_mass: bool = (
         SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
     ),
+    use_first_play_urgency_at_root_only: bool = (
+        SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
+    ),
 ) -> int:
     root = SearchNode(game_state=game_state, prior=1)
     run_search_simulations(
@@ -753,6 +815,9 @@ def select_search_move(
         first_play_urgency_reduction=first_play_urgency_reduction,
         use_first_play_urgency_prior_mass=(
             use_first_play_urgency_prior_mass
+        ),
+        use_first_play_urgency_at_root_only=(
+            use_first_play_urgency_at_root_only
         ),
     )
 
@@ -790,6 +855,10 @@ class MokaSearchSession:
         use_first_play_urgency_prior_mass: bool = (
             SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
         ),
+        use_first_play_urgency_at_root_only: bool = (
+            SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
+        ),
+        root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
         root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
     ) -> None:
         self.evaluator = evaluator
@@ -810,6 +879,10 @@ class MokaSearchSession:
         self.use_first_play_urgency_prior_mass = (
             use_first_play_urgency_prior_mass
         )
+        self.use_first_play_urgency_at_root_only = (
+            use_first_play_urgency_at_root_only
+        )
+        self.root_branch_count = root_branch_count
         self.root_policy_temperature = root_policy_temperature
         self.root: SearchNode | None = None
 
@@ -857,6 +930,7 @@ class MokaSearchSession:
                 self.root_capture_prior_bonus,
                 self.root_self_atari_prior_penalty,
             )
+            prune_root_children(root, self.root_branch_count)
             return 0
 
         expand_node_with_evaluation(
@@ -870,6 +944,7 @@ class MokaSearchSession:
             self.root_capture_prior_bonus,
             self.root_self_atari_prior_penalty,
         )
+        prune_root_children(root, self.root_branch_count)
         root.visit_count += 1
         root.value_sum += blend_search_value(
             game_state,
@@ -908,6 +983,7 @@ class MokaSearchSession:
             self.opponent_branch_count,
             self.first_play_urgency_reduction,
             self.use_first_play_urgency_prior_mass,
+            self.use_first_play_urgency_at_root_only,
         )
         ordered_visit_counts = sorted(
             (
@@ -940,6 +1016,7 @@ class MokaSearchSession:
                     self.opponent_branch_count,
                     self.first_play_urgency_reduction,
                     self.use_first_play_urgency_prior_mass,
+                    self.use_first_play_urgency_at_root_only,
                 )
 
         if not root.children:
@@ -1006,6 +1083,10 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
         use_first_play_urgency_prior_mass: bool = (
             SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
         ),
+        use_first_play_urgency_at_root_only: bool = (
+            SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
+        ),
+        root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
         root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
     ) -> None:
         super().__init__(
@@ -1025,6 +1106,10 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
             use_first_play_urgency_prior_mass=(
                 use_first_play_urgency_prior_mass
             ),
+            use_first_play_urgency_at_root_only=(
+                use_first_play_urgency_at_root_only
+            ),
+            root_branch_count=root_branch_count,
             root_policy_temperature=root_policy_temperature,
         )
         self.candidate_count = candidate_count
@@ -1052,6 +1137,7 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                 self.opponent_branch_count,
                 self.first_play_urgency_reduction,
                 self.use_first_play_urgency_prior_mass,
+                self.use_first_play_urgency_at_root_only,
             )
             root_evaluation_count += 1
 
@@ -1099,6 +1185,7 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                     self.opponent_branch_count,
                     self.first_play_urgency_reduction,
                     self.use_first_play_urgency_prior_mass,
+                    self.use_first_play_urgency_at_root_only,
                 )
 
             remaining_simulation_count -= (
