@@ -3421,3 +3421,39 @@ A bounded follow-up kept the same eightfold critical budget but split it evenly:
 On 20 fresh games from opening offset 2,700,000, the incumbent and all three candidates scored exactly seven wins, with four Black wins, three White wins, and zero caps. Aggregate pass and resignation counts changed, proving that the exports were active, but no game result improved.
 
 Immediate repeated critical distillation does not compound the promoted gain, even when old mistakes are replayed to limit forgetting. All round-two candidates are rejected. The accepted checkpoint, exact 111,920-byte artifact with SHA-256 `5d38b3d3f88582212065e6d2aee7b5d638c13e3c4ccaf9e1cab1cd341f757714`, runtime search, and Million website remain unchanged.
+
+## 2026-07-28 — Post-promotion geometric consensus
+
+### Question
+
+Does the accepted geometric root-policy blend remain optimal after the promoted policy-linear correction changed Moka's priors?
+
+The exact accepted artifact, KataGo b6c96 opponent, 64-visit search, exploration 2.0, value weight 1.25, FPU 0.25, full branching, maximum-visit selection, and all other search settings were fixed. Only the blend between the arithmetic and normalized geometric means of Moka's existing eight root-symmetry policies changed.
+
+### Screen
+
+On 20 fresh games from opening offset 2,710,000:
+
+| Geometric blend | Wins | Black | White | Caps |
+| --------------: | ---: | ----: | ----: | ---: |
+|           0.000 |    9 |     5 |     4 |    0 |
+|           0.125 |   11 |     7 |     4 |    0 |
+|           0.250 |   10 |     6 |     4 |    0 |
+|           0.375 |    8 |     5 |     3 |    0 |
+|           0.500 |    9 |     5 |     4 |    0 |
+
+Weight 0.125 was frozen as the unique screen leader.
+
+### Independent confirmation
+
+Two disjoint 100-game blocks compared the frozen candidate with production:
+
+| Opening offset | Production wins | Candidate wins | Production caps | Candidate caps |
+| -------------: | --------------: | -------------: | --------------: | -------------: |
+|      2,720,000 |              41 |             44 |               0 |              0 |
+|      2,730,000 |              37 |             37 |               0 |              0 |
+|      **Total** |          **78** |         **81** |           **0** |          **0** |
+
+Production split 38 Black and 40 White wins. The candidate split 41 Black and 40 White wins. Every game completed normally. Candidate runtimes were 282.9 and 279.3 seconds; production runtimes were 283.6 and 280.6 seconds.
+
+The candidate adds three completed wins without a cap or runtime regression. Geometric root-policy weight 0.125 is accepted as Moka's search default. Model bytes, parameter count, teacher access during play, and the Million website remain unchanged.
