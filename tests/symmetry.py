@@ -98,6 +98,33 @@ class SymmetryTest(unittest.TestCase):
         self.assertEqual(late_weight, 0)
         self.assertEqual(disabled_cutoff_weight, 0.5)
 
+    def test_rank_policy_can_require_top_move_agreement(self) -> None:
+        policies = [
+            np.asarray([0.99, 0.01], dtype=np.float32),
+            np.asarray([0.49, 0.51], dtype=np.float32),
+            np.asarray([0.49, 0.51], dtype=np.float32),
+        ]
+
+        gated_policy = aggregate_symmetry_policies(
+            policies,
+            0,
+            0,
+            1,
+            1,
+            3,
+        )
+        active_policy = aggregate_symmetry_policies(
+            policies,
+            0,
+            0,
+            1,
+            1,
+            2,
+        )
+
+        self.assertGreater(gated_policy[0], gated_policy[1])
+        self.assertGreater(active_policy[1], active_policy[0])
+
     def test_policy_and_features_transform_together(self) -> None:
         features = np.zeros(
             (BOARD_SIZE, BOARD_SIZE, INPUT_PLANE_COUNT),

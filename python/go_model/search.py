@@ -36,6 +36,7 @@ from go_model.config import (
     SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
+    SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_WEIGHT,
@@ -95,6 +96,9 @@ class MokaEvaluator:
         symmetry_rank_policy_end_move_count: int = (
             SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT
         ),
+        symmetry_rank_minimum_top_move_vote_count: int = (
+            SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT
+        ),
     ) -> None:
         self.model = model
         self.use_symmetry_ensemble = use_symmetry_ensemble
@@ -110,6 +114,9 @@ class MokaEvaluator:
         self.symmetry_rank_move_count = symmetry_rank_move_count
         self.symmetry_rank_policy_end_move_count = (
             symmetry_rank_policy_end_move_count
+        )
+        self.symmetry_rank_minimum_top_move_vote_count = (
+            symmetry_rank_minimum_top_move_vote_count
         )
         self.cache: dict[
             tuple[bytes, int, int, tuple[int, ...]],
@@ -249,6 +256,7 @@ class MokaEvaluator:
                                 game_state.move_count,
                             ),
                             self.symmetry_rank_move_count,
+                            self.symmetry_rank_minimum_top_move_vote_count,
                         ),
                         aggregate_symmetry_values(
                             value_array[symmetry_start:symmetry_end],

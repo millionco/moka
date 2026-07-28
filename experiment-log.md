@@ -2224,3 +2224,31 @@ Every win completed normally. The move-40 schedule added the most wins but regre
 On 100 untouched games from opening offset 1,630,000, the geometric control scored 34 wins with seven caps. The frozen move-56 schedule scored 33 wins with six caps. Every win completed normally; the control took 278.2 seconds and the candidate took 282.6 seconds.
 
 Ending rank consensus before the late game removed one cap but also lost one completed game. It failed the strength gate after the first confirmation block and was rejected without testing another cutoff on the confirmation openings. Production remains unchanged.
+
+## 2026-07-28 — Confidence-gated rank consensus
+
+### Hypothesis
+
+The top-eight rank blend was activated only when at least a configured number of the eight aligned symmetry policies independently selected the same top move. This tests whether rank consensus is useful only at roots with genuine orientation agreement. The frozen rank weight remained 0.50 and the rank width remained eight.
+
+### Screen
+
+On 20 fresh games from opening offset 1,640,000:
+
+| Required top-move votes | Wins | Caps |
+| ----------------------: | ---: | ---: |
+|                Disabled |    4 |    3 |
+|                       0 |    5 |    3 |
+|                       2 |    5 |    3 |
+|                       3 |    5 |    3 |
+|                       4 |    6 |    3 |
+|                       5 |    5 |    3 |
+|                       6 |    5 |    3 |
+
+Every win completed normally. Four votes was frozen as the clear screen leader.
+
+### Fresh confirmation
+
+On 100 untouched games from opening offset 1,650,000, the accepted geometric control scored 35 wins with seven caps. The four-vote rank candidate scored 38 wins with eleven caps. Every win completed normally; the control took 263.5 seconds and the candidate took 278.9 seconds.
+
+Confidence gating added three completed wins but four unfinished games. It failed the predeclared no-cap-regression gate after the first confirmation block and was rejected without testing another threshold on the confirmation openings. The browser remains unchanged.

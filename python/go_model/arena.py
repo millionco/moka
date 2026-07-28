@@ -37,6 +37,7 @@ from go_model.config import (
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
+    SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_POLICY_WEIGHT,
@@ -246,6 +247,9 @@ def run_arena(
     root_symmetry_rank_policy_end_move_count: int = (
         SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT
     ),
+    root_symmetry_rank_minimum_top_move_vote_count: int = (
+        SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT
+    ),
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -285,6 +289,9 @@ def run_arena(
             symmetry_rank_move_count=root_symmetry_rank_move_count,
             symmetry_rank_policy_end_move_count=(
                 root_symmetry_rank_policy_end_move_count
+            ),
+            symmetry_rank_minimum_top_move_vote_count=(
+                root_symmetry_rank_minimum_top_move_vote_count
             ),
         )
         if use_root_symmetry_ensemble
@@ -591,6 +598,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_ROOT_SYMMETRY_RANK_POLICY_END_MOVE_COUNT,
     )
     argument_parser.add_argument(
+        "--root-symmetry-rank-minimum-top-move-votes",
+        type=int,
+        default=SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT,
+    )
+    argument_parser.add_argument(
         "--root-branches",
         type=int,
         default=SEARCH_ROOT_BRANCH_COUNT,
@@ -680,6 +692,7 @@ def main() -> None:
         arguments.root_symmetry_rank_policy_weight,
         arguments.root_symmetry_rank_moves,
         arguments.root_symmetry_rank_end_move,
+        arguments.root_symmetry_rank_minimum_top_move_votes,
     )
 
 
