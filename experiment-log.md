@@ -3375,3 +3375,49 @@ The candidate finishes four completed wins ahead across 300 paired games and rem
 The accepted float shadow checkpoint now has SHA-256 `1ee7771f0cc68e41b22e6a05a2384338ec4d3a3763714244a6103d171abecc0a`. Its exact-dequantized checkpoint has SHA-256 `040fae5ff09762db03913e70fae1f5260d4746f5c390c2e36382b3d46468ec1e`. The accepted browser artifact has SHA-256 `5d38b3d3f88582212065e6d2aee7b5d638c13e3c4ccaf9e1cab1cd341f757714`.
 
 The architecture remains 104,129 parameters, the browser artifact remains 111,920 bytes, and the accepted runtime search remains 64 visits. Only the Moka repository artifact is updated. The Million website remains untouched.
+
+## 2026-07-28 — Second-round critical-QAT distillation
+
+### Question
+
+Can the promoted sparse critical-QAT method compound by collecting mistakes from the new accepted artifact's changed trajectories?
+
+### New on-policy corpus
+
+The exact accepted artifact generated a separate corpus using the unchanged successful collection recipe:
+
+- 256 Moka-versus-b6 games from opening offset 3,100,000
+- alternating colors and deterministic 64-visit Moka search
+- 12.5% highest b6 action-regret turns and 12.5% uniform turns
+- Moka decision turns only
+- 64 native b18 visits per selected root
+
+The corpus contains 2,154 roots and is 822,012 compressed bytes. Its SHA-256 is `728bd8b9ecb68751aa6bf4060360109a68fe26b8024fa1160c638408fa085175`.
+
+B18 evaluated Moka's actual move on 84.3% of roots. Moka selected the b18 top move on 38.3%. The selected set remained enriched:
+
+| Minimum b18 regret | Roots | Fraction |
+| -----------------: | ----: | -------: |
+|               0.05 |   272 |   12.63% |
+|               0.10 |   226 |   10.49% |
+|               0.20 |   166 |    7.71% |
+|               0.40 |    91 |    4.22% |
+|               0.80 |    31 |    1.44% |
+
+The critical archive has SHA-256 `218b4128b338dcc0ac911f3cf486775182eb9f5ad33d9e6bc012840065d4406f`. It contains 134 material training roots, including 47 winner flips; validation contains 20 material roots and test contains 12.
+
+### Pure round-two replay
+
+Seeds 161, 162, and 163 used the accepted eightfold critical-QAT recipe unchanged: one epoch, learning rate 0.000020, policy-linear tensors only, exact INT8-aware forward passes, policy preservation weight 0.25, and both accepted search corpora as replay.
+
+Every exact export remained 111,920 bytes. Critical test loss changed from 2.2689 for the incumbent to 2.2679–2.2681. Seed 162 preserved the incumbent's 39.6% top-move agreement; the other seeds scored 39.2%.
+
+On 20 fresh games from opening offset 2,690,000, the incumbent scored ten wins. All three seeds scored nine, with six Black wins, three White wins, and zero caps. Pure second-round replay was rejected without confirmation.
+
+### Balanced old/new replay
+
+A bounded follow-up kept the same eightfold critical budget but split it evenly: four copies of the first accepted critical corpus and four copies of the new corpus. Seeds 167, 168, and 169 retained the same optimizer, learning rate, preservation, exact-QAT, and search replay settings.
+
+On 20 fresh games from opening offset 2,700,000, the incumbent and all three candidates scored exactly seven wins, with four Black wins, three White wins, and zero caps. Aggregate pass and resignation counts changed, proving that the exports were active, but no game result improved.
+
+Immediate repeated critical distillation does not compound the promoted gain, even when old mistakes are replayed to limit forgetting. All round-two candidates are rejected. The accepted checkpoint, exact 111,920-byte artifact with SHA-256 `5d38b3d3f88582212065e6d2aee7b5d638c13e3c4ccaf9e1cab1cd341f757714`, runtime search, and Million website remain unchanged.
