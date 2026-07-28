@@ -13,6 +13,7 @@ from go_model.config import (
     INPUT_PLANE_COUNT,
     POLICY_MOVE_COUNT,
 )
+from go_model.symmetry_distill import create_symmetry_consensus_targets
 
 
 class BlunderRiskTests(unittest.TestCase):
@@ -67,6 +68,25 @@ class BlunderRiskTests(unittest.TestCase):
             1,
             atol=np.finfo(np.float32).eps,
         )
+
+    def test_symmetry_consensus_aggregates_policies_and_values(self) -> None:
+        policies = np.zeros(
+            (1, 8, POLICY_MOVE_COUNT),
+            dtype=np.float32,
+        )
+        policies[:, :, 0] = 0.75
+        policies[:, :, 1] = 0.25
+        values = np.arange(8, dtype=np.float32).reshape(1, 8)
+
+        consensus_policies, consensus_values = (
+            create_symmetry_consensus_targets(policies, values)
+        )
+
+        np.testing.assert_allclose(
+            consensus_policies[0, :2],
+            np.asarray([0.75, 0.25]),
+        )
+        self.assertAlmostEqual(float(consensus_values[0]), 3.5)
 
 
 if __name__ == "__main__":

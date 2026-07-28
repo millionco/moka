@@ -3896,3 +3896,66 @@ On 20 fresh games from opening offset 3,010,000:
 | Seed 243  |    7 |     3 |     4 |    0 |
 
 All candidates regressed and were rejected without confirmation. The blunder-risk selector remains available for offline collection, but sparse policy-linear correction is still unstable. The accepted checkpoint, search, browser artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Symmetry-consensus distillation
+
+### Search audit
+
+The accepted MCTS was audited before another training round. Legal expansion, current-player value perspective, terminal backup signs, root visit accounting, subtree alignment, and pass handling were consistent with the intended player. No correctness fix was justified.
+
+The actionable mismatch was between root and descendant evaluation. Every real root uses Moka's eight aligned symmetries, but each descendant uses one canonical view. Across three disjoint accepted-player corpora, the canonical policy agreed with the accepted eight-view consensus on 77.3%, 77.5%, and 81.6% of positions. Mean consensus-to-canonical KL was 0.0926, 0.0923, and 0.1046. The same symmetry instability had already predicted b18-critical errors.
+
+### Consensus targets
+
+An offline generator now evaluates every input position in all eight symmetries, aligns the policies, applies the accepted 0.125 geometric blend, and averages the values. It replaces only the policy and value targets in an existing archive. It does not run during browser inference, search, or arena play.
+
+The frozen accepted artifact generated consensus targets for 6,480 positions:
+
+| Opening offset | Positions | Target archive SHA-256                                             |
+| -------------: | --------: | :----------------------------------------------------------------- |
+|      3,000,000 |     2,181 | `b6bf51161595c78f821e8f50ecaccad8a068c8228eb0af1259183e96fc203afc` |
+|      3,100,000 |     2,154 | `e6ea90788dfd48c8a3cac7e7a56df519cecbe0941fd1c2fb7b49706d17171333` |
+|      3,500,000 |     2,145 | `bc384529e096ee3459ef911825c9cae32c1b9d6d501b61f486cab70375365c2b` |
+
+The committed generator reproduced the experimental policy and value targets exactly.
+
+### Training
+
+Two quantization-aware one-epoch families started from the exact accepted artifact and used all three corpora with policy-preservation weight 0.25:
+
+- policy-linear-only seeds 251–253 at learning rate 0.000020;
+- full-network seeds 254–256 at learning rate 0.000002.
+
+These conservative rates changed symmetry KL by too little to justify an arena. A bounded stronger round retained the targets, epoch count, preservation, and exact INT8 path:
+
+- policy-linear-only seeds 257–259 at learning rate 0.000100;
+- full-network seeds 260–262 at learning rate 0.000010.
+
+The stronger policy-only family increased symmetry disagreement and was rejected offline. The full-network family reduced consensus KL by 5.6%–6.8% and improved b18 policy loss on the fresh 3,300,000 and 3,500,000 test buckets. Seed 260 retained the smallest value-error regression among the family and advanced with both siblings to the fixed screen.
+
+### Arena
+
+On 20 fresh games from opening offset 3,020,000:
+
+| Player    | Wins | Black | White | Caps |
+| :-------- | ---: | ----: | ----: | ---: |
+| Incumbent |    7 |     3 |     4 |    0 |
+| Seed 260  |    8 |     5 |     3 |    0 |
+| Seed 261  |    6 |     5 |     1 |    0 |
+| Seed 262  |    7 |     5 |     2 |    0 |
+
+Seed 260 was frozen as the unique screen leader. Two untouched 100-game blocks compared that exact candidate with the incumbent:
+
+| Opening offset | Incumbent wins | Candidate wins | Incumbent caps | Candidate caps |
+| -------------: | -------------: | -------------: | -------------: | -------------: |
+|      3,030,000 |             35 |             50 |              0 |              0 |
+|      3,040,000 |             45 |             42 |              0 |              0 |
+|      **Total** |         **80** |         **92** |          **0** |          **0** |
+
+The incumbent split 42 Black and 38 White wins. Seed 260 split 41 Black and 51 White wins. Candidate runtime was 518.9 seconds versus 533.8 seconds for the incumbent. The candidate added 12 completed wins without a cap or runtime regression and is promoted.
+
+The accepted float-shadow checkpoint now has SHA-256 `58abe149b8dd9cc1cb5f869f8c6cd7788f3b0858294ea553e0531161cded0474`. Its exact-dequantized checkpoint has SHA-256 `a36f61fedd6e9ecc8bd426e8fdaa08a4f989e39c1ffd78d8b3cfab3d20cf5563`. The 111,920-byte browser artifact has SHA-256 `51a9f91f66d8c3725911afad7ad299bb6b50ea3a5ef2b16e2a62ec5379942a75`.
+
+The previously frozen blunder-risk score remained valid after promotion. On the untouched offset-3,300,000 proxy corpus, ROC AUC increased from 0.717 to 0.724 while top-20% critical rate remained 13.49% and recall remained 44.6%.
+
+The Million website remains unchanged.

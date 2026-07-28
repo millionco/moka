@@ -180,13 +180,18 @@ def normalize_legal_policies(
     )
 
 
-def evaluate_blunder_risk_scores(
+def evaluate_aligned_symmetry_outputs(
     model: MokaNestedNetwork,
     features: np.ndarray,
     batch_size: int,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     empty_policy = np.zeros(POLICY_MOVE_COUNT, dtype=np.float32)
-    scores: list[np.ndarray] = []
+    aligned_policy_batches: list[np.ndarray] = []
+    symmetry_value_batches: list[np.ndarray] = []
+    symmetry_count = (
+        BOARD_SYMMETRY_ROTATION_COUNT
+        * BOARD_SYMMETRY_REFLECTION_COUNT
+    )
 
     for batch_start in range(0, len(features), batch_size):
         batch_features = features[batch_start:batch_start + batch_size]
@@ -219,10 +224,6 @@ def evaluate_blunder_risk_scores(
             axis=1,
             keepdims=True,
         )
-        symmetry_count = (
-            BOARD_SYMMETRY_ROTATION_COUNT
-            * BOARD_SYMMETRY_REFLECTION_COUNT
-        )
         aligned_policies = np.stack(
             [
                 invert_policy_symmetry(
@@ -237,28 +238,52 @@ def evaluate_blunder_risk_scores(
             symmetry_count,
             POLICY_MOVE_COUNT,
         )
-        normalized_policies = normalize_legal_policies(
-            aligned_policies,
-            batch_features,
-        )
         symmetry_values = np.asarray(values).reshape(
             len(batch_features),
             symmetry_count,
         )
-        scores.append(
-            calculate_blunder_risk_scores(
-                calculate_blunder_risk_features(
-                    normalized_policies,
-                    symmetry_values,
-                    batch_features,
-                )
-            )
-        )
+        aligned_policy_batches.append(aligned_policies)
+        symmetry_value_batches.append(symmetry_values)
 
     return (
-        np.concatenate(scores)
-        if scores
-        else np.empty(0, dtype=np.float32)
+        (
+            np.concatenate(aligned_policy_batches)
+            if aligned_policy_batches
+            else np.empty(
+                (0, symmetry_count, POLICY_MOVE_COUNT),
+                dtype=np.float32,
+            )
+        ),
+        (
+            np.concatenate(symmetry_value_batches)
+            if symmetry_value_batches
+            else np.empty((0, symmetry_count), dtype=np.float32)
+        ),
+    )
+
+
+def evaluate_blunder_risk_scores(
+    model: MokaNestedNetwork,
+    features: np.ndarray,
+    batch_size: int,
+) -> np.ndarray:
+    aligned_policies, symmetry_values = (
+        evaluate_aligned_symmetry_outputs(
+            model,
+            features,
+            batch_size,
+        )
+    )
+    normalized_policies = normalize_legal_policies(
+        aligned_policies,
+        features,
+    )
+    return calculate_blunder_risk_scores(
+        calculate_blunder_risk_features(
+            normalized_policies,
+            symmetry_values,
+            features,
+        )
     )
 
 
