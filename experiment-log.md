@@ -2970,3 +2970,21 @@ On 20 fresh exact-INT8 games from opening offset 2,360,000:
 | Seed 115  |    7 |    0 |     3 |     4 |
 
 No seed improved wins, so none advanced. The preference-training branch was removed after rejection. The accepted player, checkpoint, and INT8 artifact are unchanged. No website files were touched.
+
+## 2026-07-28 — Stronger-teacher root-only evaluator
+
+### Hypothesis
+
+The stronger b18 candidate contained useful float policy signal but failed when used for every descendant policy and value. Supplying its policy only at real move roots while retaining the accepted artifact for the complete descendant tree could isolate that signal. Both evaluators remained local Moka models; KataGo was never queried for Moka's moves during play.
+
+The research arena temporarily accepted a separate root checkpoint. Root symmetry, geometric aggregation, the 64-visit budget, and every other accepted search setting were unchanged.
+
+On 20 fresh exact-INT8 games from opening offset 2,370,000:
+
+| Root evaluator        | Wins | Caps | Black | White |
+| --------------------- | ---: | ---: | ----: | ----: |
+| Accepted artifact     |   11 |    0 |     5 |     6 |
+| Ordinary b18 blend    |    9 |    0 |     4 |     5 |
+| INT8-anchored 25% b18 |   11 |    0 |     5 |     6 |
+
+The ordinary stronger-teacher root lost two games. The conservative root reproduced the control rather than improving it. Neither advanced, and the alternate-root runtime path was removed. The accepted player, checkpoint, and INT8 artifact are unchanged. No website files were touched.
