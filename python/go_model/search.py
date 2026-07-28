@@ -966,6 +966,17 @@ class MokaSearchSession:
         game_state: GameState,
         simulation_count: int,
     ) -> tuple[int, np.ndarray]:
+        move, policy, _, _ = self.select_move_with_search_targets(
+            game_state,
+            simulation_count,
+        )
+        return move, policy
+
+    def select_move_with_search_targets(
+        self,
+        game_state: GameState,
+        simulation_count: int,
+    ) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
         root = self.align_root(game_state)
         root_evaluation_count = self.refresh_root_evaluation(
             root,
@@ -1022,7 +1033,12 @@ class MokaSearchSession:
         if not root.children:
             policy = np.zeros(BOARD_AREA + 1, dtype=np.float32)
             policy[BOARD_AREA] = 1
-            return BOARD_AREA, policy
+            return (
+                BOARD_AREA,
+                policy,
+                np.zeros(BOARD_AREA + 1, dtype=np.float32),
+                np.zeros(BOARD_AREA + 1, dtype=np.float32),
+            )
 
         selectable_root_children = list(root.children.items())
 
@@ -1046,15 +1062,20 @@ class MokaSearchSession:
                 key=lambda move_and_child: move_and_child[1].visit_count,
             )
         policy = np.zeros(BOARD_AREA + 1, dtype=np.float32)
+        q_values = np.zeros(BOARD_AREA + 1, dtype=np.float32)
+        q_weights = np.zeros(BOARD_AREA + 1, dtype=np.float32)
         child_visit_sum = sum(
             child.visit_count for child in root.children.values()
         )
 
         for child_move, child in root.children.items():
             policy[child_move] = child.visit_count / child_visit_sum
+            if child.visit_count > 0:
+                q_values[child_move] = -child.mean_value
+                q_weights[child_move] = child.visit_count
 
         self.root = selected_child
-        return move, policy
+        return move, policy, q_values, q_weights
 
 
 class MokaSequentialHalvingSearchSession(MokaSearchSession):

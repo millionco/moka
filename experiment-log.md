@@ -1971,3 +1971,42 @@ Loading the incumbent weights under the new activation changed outputs substanti
 The short runs reached only 44.1%–44.4% top-move agreement on untouched test games, versus 55.2% for the incumbent. A single predeclared 12-epoch recovery run improved steadily to 54.3% agreement. Its value MAE improved from the incumbent's 0.2892 to 0.2627, but policy agreement remained below the required recovery baseline.
 
 The activation candidate failed the offline gate and was never evaluated on arena openings. Its implementation was removed rather than retaining an unpromoted runtime branch.
+
+## 2026-07-28 — Deployment topology correction
+
+### Harness mismatch
+
+The browser expands and evaluates one leaf after every PUCT selection. The Python research constant had drifted back to batches of eight reserved leaves even though the earlier experiment log identified one-leaf search as the stronger topology. Fixed human probes still matched, but those four decisions were insufficient evidence that broad arena outcomes matched.
+
+The Python default was restored to one leaf per wave before generating more training data.
+
+### Matched comparison
+
+On 20 fresh games from opening offset 1,390,000, deployment-exact one-leaf search scored seven wins with one cap. The stale eight-leaf topology scored five wins with four caps on the identical openings.
+
+The result reproduced on 100 fresh games from offset 1,400,000:
+
+| Topology       | Wins | Black | White | Caps | Cap wins |
+| -------------- | ---: | ----: | ----: | ---: | -------: |
+| One-leaf waves |   31 |    13 |    18 |    5 |        0 |
+| Eight-leaf     |   20 |     8 |    12 |    9 |        0 |
+
+A second disjoint one-leaf block at offset 1,410,000 scored 30 wins, split 16 Black and 14 White, with three caps and no cap-awarded wins. Across the two deployment-topology blocks, Moka won 61 of 200 completed games with eight caps.
+
+This corrects the research harness rather than changing production: the browser already used the stronger one-leaf implementation.
+
+## 2026-07-28 — Root action-value policy targets
+
+### Corpus
+
+The corrected one-leaf search exposed root-perspective Q-values as `-child.mean_value` for every visited sibling. Unvisited moves received zero target weight. A temperature-0.25 softmax converted the measured Q-values into a policy, mixed 75% Q policy with 25% visit policy, and retained the unchanged teacher value target.
+
+The 128-game Moka-turn-only corpus from opening offset 1,420,000 used 28 visits, root symmetry, exploration 2.0, FPU 0.25, and full branching. It contained 4,535 roots: 3,602 training, 430 validation, and 503 test rows by whole game. Each root evaluated 5.24 siblings on average. All targets were finite and normalized. The archive SHA-256 was `da1562c0023168ea4481090f3bebd63c494499abbab3c758213368888614df92`.
+
+### Frozen-head continuation
+
+Three two-epoch policy-head seeds used learning rate 0.00001, the existing 20,000-position browser on-policy corpus as preservation replay, and a 0.25 logit-preservation penalty.
+
+The incumbent scored 60.0% validation and 65.6% test top-move agreement against the Q-derived targets. Seeds 60, 61, and 62 reached 58.6%, 58.6%, and 59.8% validation agreement and 65.0%, 65.0%, and 65.4% test agreement.
+
+Every candidate regressed on both held-out gates. None entered the arena. Direct root-Q targets are now reproducible, but this corpus and frozen-head recipe did not improve action ranking.

@@ -13,6 +13,7 @@ from go_model.search import (
     run_search_simulations,
     select_child,
 )
+from go_model.search_collect import create_search_q_policy
 
 
 class UniformEvaluator:
@@ -196,6 +197,44 @@ class SearchTest(unittest.TestCase):
 
         self.assertGreater(root.children[0].prior, 0.9)
         self.assertLess(root.children[1].prior, 0.1)
+
+    def test_search_targets_report_root_perspective_q_values(self) -> None:
+        class PositiveEvaluator(UniformEvaluator):
+            def evaluate(
+                self,
+                game_state: GameState,
+            ) -> tuple[np.ndarray, float]:
+                policy, _ = super().evaluate(game_state)
+                return policy, 0.75
+
+        evaluator = PositiveEvaluator()
+        search_session = MokaSearchSession(evaluator)
+
+        _, _, q_values, q_weights = (
+            search_session.select_move_with_search_targets(
+                GameState(),
+                2,
+            )
+        )
+
+        self.assertEqual(np.sum(q_weights), 1)
+        self.assertTrue(
+            np.allclose(
+                q_values[q_weights > 0],
+                -0.75,
+            )
+        )
+
+    def test_search_q_policy_uses_only_visited_moves(self) -> None:
+        q_values = np.asarray([0.5, 0.25, 0.75, 1.0], dtype=np.float32)
+        q_weights = np.asarray([1, 1, 0, 0], dtype=np.float32)
+
+        q_policy = create_search_q_policy(q_values, q_weights, 0.25)
+
+        self.assertAlmostEqual(float(np.sum(q_policy)), 1)
+        self.assertGreater(q_policy[0], q_policy[1])
+        self.assertEqual(q_policy[2], 0)
+        self.assertEqual(q_policy[3], 0)
 
 
 if __name__ == "__main__":

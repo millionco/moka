@@ -11,12 +11,40 @@ from go_model.config import (
     SEARCH_DISTILLATION_DEFAULT_SIMULATION_COUNT,
     SEARCH_DISTILLATION_OPENING_OFFSET,
     SEARCH_DISTILLATION_PROGRESS_INTERVAL_GAMES,
+    SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
     SEARCH_OPPONENT_BRANCH_COUNT,
+    SEARCH_PUCT_EXPLORATION,
+    SEARCH_Q_POLICY_BLEND,
+    SEARCH_Q_POLICY_TEMPERATURE,
 )
 from go_model.features import encode_moka_features
 from go_model.model import create_moka_network
 from go_model.search import MokaEvaluator, MokaSearchSession
 from go_model.teacher import KataGoTeacher
+
+
+def create_search_q_policy(
+    q_values: np.ndarray,
+    q_weights: np.ndarray,
+    temperature: float,
+) -> np.ndarray:
+    if temperature <= 0:
+        raise ValueError("Search Q policy temperature must be positive.")
+
+    visited_mask = q_weights > 0
+    q_policy = np.zeros_like(q_values)
+
+    if not np.any(visited_mask):
+        return q_policy
+
+    visited_q_values = q_values[visited_mask]
+    maximum_q_value = float(np.max(visited_q_values))
+    visited_probabilities = np.exp(
+        (visited_q_values - maximum_q_value) / temperature
+    )
+    visited_probabilities /= np.sum(visited_probabilities)
+    q_policy[visited_mask] = visited_probabilities
+    return q_policy
 
 
 def collect_search_distillation_dataset(
@@ -31,11 +59,21 @@ def collect_search_distillation_dataset(
     search_policy_blend: float,
     search_sample_weight: float,
     use_moka_turns_only: bool,
+    search_q_policy_blend: float = SEARCH_Q_POLICY_BLEND,
+    search_q_policy_temperature: float = SEARCH_Q_POLICY_TEMPERATURE,
+    search_exploration: float = SEARCH_PUCT_EXPLORATION,
+    search_first_play_urgency_reduction: float = (
+        SEARCH_FIRST_PLAY_URGENCY_REDUCTION
+    ),
 ) -> dict[str, np.ndarray]:
     if not 0 <= search_policy_blend <= 1:
         raise ValueError("Search policy blend must be between zero and one.")
     if search_sample_weight <= 0:
         raise ValueError("Search sample weight must be positive.")
+    if not 0 <= search_q_policy_blend <= 1:
+        raise ValueError("Search Q policy blend must be between zero and one.")
+    if search_q_policy_temperature <= 0:
+        raise ValueError("Search Q policy temperature must be positive.")
 
     model = create_moka_network(True, False, False, False, False)
     model.load_weights(str(checkpoint_path))
@@ -47,6 +85,8 @@ def collect_search_distillation_dataset(
     values: list[float] = []
     game_ids: list[int] = []
     sample_weights: list[float] = []
+    search_q_values: list[np.ndarray] = []
+    search_q_weights: list[np.ndarray] = []
     root_evaluator = (
         MokaEvaluator(model, use_symmetry_ensemble=True)
         if use_root_symmetry_ensemble
@@ -58,8 +98,12 @@ def collect_search_distillation_dataset(
         is_moka_black = game_id % 2 == 0
         search_session = MokaSearchSession(
             evaluator,
+            exploration=search_exploration,
             opponent_branch_count=opponent_branch_count,
             root_evaluator=root_evaluator,
+            first_play_urgency_reduction=(
+                search_first_play_urgency_reduction
+            ),
         )
 
         while not is_game_over(game_state):
@@ -72,13 +116,32 @@ def collect_search_distillation_dataset(
                     if root_evaluator is not None
                     else evaluator.evaluate(game_state)[0]
                 )
-                move, target_policy = search_session.select_move_with_policy(
+                (
+                    move,
+                    target_policy,
+                    root_q_values,
+                    root_q_weights,
+                ) = search_session.select_move_with_search_targets(
                     game_state,
                     simulation_count,
                 )
                 if use_teacher_policy_targets:
                     target_policy = teacher_policy
-                elif search_policy_blend < 1:
+                else:
+                    if search_q_policy_blend > 0:
+                        q_policy = create_search_q_policy(
+                            root_q_values,
+                            root_q_weights,
+                            search_q_policy_temperature,
+                        )
+                        target_policy = (
+                            search_q_policy_blend * q_policy
+                            + (1 - search_q_policy_blend) * target_policy
+                        )
+                if (
+                    not use_teacher_policy_targets
+                    and search_policy_blend < 1
+                ):
                     legal_moves = get_legal_moves(game_state)
                     legal_root_policy = np.zeros_like(root_policy)
                     legal_root_policy[legal_moves] = root_policy[legal_moves]
@@ -90,6 +153,8 @@ def collect_search_distillation_dataset(
             else:
                 move = select_greedy_rollout_move(game_state, teacher_policy)
                 target_policy = teacher_policy
+                root_q_values = np.zeros_like(teacher_policy)
+                root_q_weights = np.zeros_like(teacher_policy)
 
             if is_moka_turn or not use_moka_turns_only:
                 features.append(encode_moka_features(game_state))
@@ -99,6 +164,8 @@ def collect_search_distillation_dataset(
                 sample_weights.append(
                     search_sample_weight if is_moka_turn else 1
                 )
+                search_q_values.append(root_q_values)
+                search_q_weights.append(root_q_weights)
             next_state = play_move(game_state, move)
 
             if next_state is None:
@@ -122,6 +189,8 @@ def collect_search_distillation_dataset(
         "game_ids": np.asarray(game_ids, dtype=np.int32),
         "policies": np.asarray(policies, dtype=np.float16),
         "sample_weights": np.asarray(sample_weights, dtype=np.float16),
+        "search_q_values": np.asarray(search_q_values, dtype=np.float16),
+        "search_q_weights": np.asarray(search_q_weights, dtype=np.float16),
         "values": np.asarray(values, dtype=np.float16),
     }
 
@@ -181,6 +250,26 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--moka-turns-only",
         action="store_true",
     )
+    argument_parser.add_argument(
+        "--search-q-policy-blend",
+        type=float,
+        default=SEARCH_Q_POLICY_BLEND,
+    )
+    argument_parser.add_argument(
+        "--search-q-policy-temperature",
+        type=float,
+        default=SEARCH_Q_POLICY_TEMPERATURE,
+    )
+    argument_parser.add_argument(
+        "--search-exploration",
+        type=float,
+        default=SEARCH_PUCT_EXPLORATION,
+    )
+    argument_parser.add_argument(
+        "--search-fpu-reduction",
+        type=float,
+        default=SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
+    )
     return argument_parser
 
 
@@ -198,6 +287,10 @@ def main() -> None:
         arguments.search_policy_blend,
         arguments.search_sample_weight,
         arguments.moka_turns_only,
+        arguments.search_q_policy_blend,
+        arguments.search_q_policy_temperature,
+        arguments.search_exploration,
+        arguments.search_fpu_reduction,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)
