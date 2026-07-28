@@ -14,6 +14,7 @@ from go_model.search_generate import (
     is_moka_turn,
     move_to_coordinate,
     select_analysis_turns,
+    validate_reanalysis_modes,
 )
 
 
@@ -171,6 +172,16 @@ class SearchGenerationTests(unittest.TestCase):
                 False,
             )
         )
+
+    def test_blunder_risk_requires_selective_reanalysis(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_reanalysis_modes(False, False, True)
+
+    def test_blunder_risk_cannot_combine_with_regret(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_reanalysis_modes(True, True, True)
+
+        validate_reanalysis_modes(True, False, True)
 
 
 if __name__ == "__main__":

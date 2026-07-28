@@ -13,6 +13,7 @@ from go_model.arena import (
     should_resign_selected_pass,
 )
 from go_model.board import GameState, get_legal_moves, is_game_over, play_move
+from go_model.blunder import calculate_game_blunder_risks
 from go_model.collect import (
     evaluate_moka_batch,
     sample_rollout_move,
@@ -469,6 +470,22 @@ def get_eligible_analysis_turns(
     ]
 
 
+def validate_reanalysis_modes(
+    use_selective_reanalysis: bool,
+    use_action_regret: bool,
+    use_blunder_risk_reanalysis: bool,
+) -> None:
+    if use_blunder_risk_reanalysis and not use_selective_reanalysis:
+        raise ValueError(
+            "Blunder-risk reanalysis requires selective reanalysis."
+        )
+
+    if use_blunder_risk_reanalysis and use_action_regret:
+        raise ValueError(
+            "Blunder-risk and regret reanalysis cannot be combined."
+        )
+
+
 def create_analysis_query(
     game_id: int | str,
     moves: list[int],
@@ -588,7 +605,14 @@ def create_search_dataset(
     use_moka_turns_only: bool,
     include_auxiliary_targets: bool,
     use_teacher_branches: bool,
+    use_blunder_risk_reanalysis: bool,
 ) -> dict[str, np.ndarray]:
+    validate_reanalysis_modes(
+        use_selective_reanalysis,
+        use_action_regret,
+        use_blunder_risk_reanalysis,
+    )
+
     if use_counterfactual_reanalysis and use_teacher_branches:
         raise ValueError(
             "Teacher branches cannot be combined with counterfactual reanalysis."
@@ -615,6 +639,13 @@ def create_search_dataset(
         )
         for game_id in range(game_count)
     ]
+    if use_blunder_risk_reanalysis:
+        game_surprises = calculate_game_blunder_risks(
+            checkpoint_path,
+            game_state_histories,
+            eligible_analysis_turns,
+            batch_size,
+        )
     analysis_turns = [
         (
             select_analysis_turns(
@@ -994,6 +1025,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--opening-offset", type=int)
     argument_parser.add_argument("--regret-reanalysis", action="store_true")
     argument_parser.add_argument(
+        "--blunder-risk-reanalysis",
+        action="store_true",
+    )
+    argument_parser.add_argument(
         "--middle-game-reanalysis",
         action="store_true",
     )
@@ -1052,6 +1087,7 @@ def main() -> None:
         arguments.moka_turns_only,
         arguments.auxiliary_targets,
         arguments.teacher_branches,
+        arguments.blunder_risk_reanalysis,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)

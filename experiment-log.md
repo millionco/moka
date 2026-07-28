@@ -3851,3 +3851,48 @@ On 20 fresh games from opening offset 2,970,000:
 The top-10% route was frozen as the smaller screen leader. On 100 untouched paired games from opening offset 2,980,000, accepted Moka won 41 games and the routed candidate won 39. Both had zero caps. The candidate routed 261 roots and took 270.8 seconds versus 268.6 seconds for the control.
 
 The independent risk score identifies materially bad roots, but neither extra visits nor routing to a globally unstable policy improved confirmed play. Both runtime paths were removed after rejection. This separates detection from correction: future work should use the score to improve training coverage or candidate generation, not to spend more of the same search or switch between the same two policies. The accepted model, 64-visit search, 111,920-byte artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Blunder-risk teacher selection
+
+### Hypothesis
+
+The frozen Moka-only blunder score may be more useful for allocating offline b18 labels than for changing runtime search. The score was integrated as an opt-in selective-reanalysis mode. It evaluates the existing model in all eight root symmetries, uses the previously frozen logistic coefficients, and never runs in the browser or during arena play.
+
+The implementation first reproduced the untouched offset-3,300,000 benchmark exactly:
+
+| Metric                  | Result |
+| :---------------------- | -----: |
+| Critical rate           |  6.04% |
+| ROC AUC                 |  0.717 |
+| Top-20% critical rate   | 13.49% |
+| Top-20% critical recall |  44.6% |
+
+### Fresh selected corpus
+
+The exact accepted artifact generated 256 new deterministic games from opening offset 3,500,000. Moka used the accepted 64-visit search against b6c96. Only Moka turns were eligible. One quarter of each game's eligible turns were labeled by native b18 at 64 visits, split evenly between uniform selection and highest predicted blunder risk.
+
+The resulting archive contains 2,145 roots and has SHA-256 `98cdb718b186866681a8cb1682acd2c743aad6f1d90d9e62c9b86174d5e417af`. B18 evaluated Moka's selected move on 90.0% of roots. Moka selected b18's top move on 42.2%.
+
+| Selector corpus             | Roots | Regret ≥ 0.2 | Critical rate | Winner flips |
+| :-------------------------- | ----: | -----------: | ------------: | -----------: |
+| Previous b6-regret selector | 2,181 |          153 |         7.02% |           51 |
+| Moka-risk selector          | 2,145 |          177 |         8.25% |           51 |
+
+The Moka-risk selector increased material-root density by 17.5% relative and found 24 more material errors with slightly fewer labels. Its critical archive has SHA-256 `fbb750af0f4a419bf4215fb9cf259b1aa72ae87a20eac2cc3c3d16a0332d2fec`. It contains 146 material training roots, 13 validation roots, and 18 test roots.
+
+### Exact policy-QAT screen
+
+Seeds 241, 242, and 243 used the accepted policy-only recipe: one epoch, learning rate 0.000020, eightfold critical replay, both accepted search corpora once, frozen trunk and policy convolution, INT8-aware forward passes, and policy preservation weight 0.25.
+
+Every exact export remained 111,920 bytes. Seed 243 had the best new-corpus test result, improving hard-target move agreement from 29.3% to 31.1% while matching the incumbent's loss. Seeds 241 and 242 preserved the older critical sets more closely.
+
+On 20 fresh games from opening offset 3,010,000:
+
+| Player    | Wins | Black | White | Caps |
+| :-------- | ---: | ----: | ----: | ---: |
+| Incumbent |   10 |     5 |     5 |    0 |
+| Seed 241  |    7 |     5 |     2 |    0 |
+| Seed 242  |    7 |     4 |     3 |    0 |
+| Seed 243  |    7 |     3 |     4 |    0 |
+
+All candidates regressed and were rejected without confirmation. The blunder-risk selector remains available for offline collection, but sparse policy-linear correction is still unstable. The accepted checkpoint, search, browser artifact, and Million website remain unchanged.
