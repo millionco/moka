@@ -31,6 +31,9 @@ from go_model.config import (
     SEARCH_POLICY_EPSILON,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
+    SEARCH_Q_VALUE_NORMALIZATION_EPSILON,
+    SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY,
+    SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
@@ -466,6 +469,9 @@ def select_child(
     use_first_play_urgency_prior_mass: bool = (
         SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS
     ),
+    q_value_normalization_weight: float = (
+        SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
+    ),
 ) -> SearchNode:
     reservation_counts = reservation_counts or {}
     parent_visit_scale = np.sqrt(
@@ -484,13 +490,32 @@ def select_child(
         if use_first_play_urgency_prior_mass
         else first_play_urgency_reduction
     )
+    visited_child_values = [
+        -child.mean_value
+        for child in node.children.values()
+        if (
+            child.visit_count + reservation_counts.get(id(child), 0)
+        )
+        > 0
+    ]
+    minimum_child_value = (
+        min(visited_child_values)
+        if len(visited_child_values) >= 2
+        else 0
+    )
+    maximum_child_value = (
+        max(visited_child_values)
+        if len(visited_child_values) >= 2
+        else 0
+    )
+    child_value_range = maximum_child_value - minimum_child_value
 
     def get_child_score(child: SearchNode) -> float:
         child_reservation_count = reservation_counts.get(id(child), 0)
         effective_child_visit_count = (
             child.visit_count + child_reservation_count
         )
-        parent_value = (
+        child_value = (
             node.mean_value - effective_first_play_urgency_reduction
             if (
                 effective_child_visit_count == 0
@@ -498,8 +523,27 @@ def select_child(
             )
             else -child.mean_value
         )
+        normalized_child_value = (
+            float(
+                np.clip(
+                    (child_value - minimum_child_value) / child_value_range,
+                    0,
+                    1,
+                )
+            )
+            if (
+                q_value_normalization_weight > 0
+                and child_value_range
+                > SEARCH_Q_VALUE_NORMALIZATION_EPSILON
+            )
+            else child_value
+        )
+        effective_child_value = (
+            (1 - q_value_normalization_weight) * child_value
+            + q_value_normalization_weight * normalized_child_value
+        )
         return (
-            value_weight * parent_value
+            value_weight * effective_child_value
             + exploration
             * child.prior
             * parent_visit_scale
@@ -524,6 +568,18 @@ def resolve_first_play_urgency_reduction(
     )
 
 
+def resolve_q_value_normalization_weight(
+    q_value_normalization_weight: float,
+    use_q_value_normalization_at_root_only: bool,
+    is_root: bool,
+) -> float:
+    return (
+        q_value_normalization_weight
+        if is_root or not use_q_value_normalization_at_root_only
+        else 0
+    )
+
+
 def run_simulation(
     node: SearchNode,
     evaluator: MokaEvaluator,
@@ -541,6 +597,12 @@ def run_simulation(
     ),
     use_first_play_urgency_at_root_only: bool = (
         SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
+    ),
+    q_value_normalization_weight: float = (
+        SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
+    ),
+    use_q_value_normalization_at_root_only: bool = (
+        SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
     ),
     is_root: bool = True,
 ) -> float:
@@ -583,6 +645,13 @@ def run_simulation(
             use_first_play_urgency_prior_mass=(
                 use_first_play_urgency_prior_mass
             ),
+            q_value_normalization_weight=(
+                resolve_q_value_normalization_weight(
+                    q_value_normalization_weight,
+                    use_q_value_normalization_at_root_only,
+                    is_root,
+                )
+            ),
         )
         value = -run_simulation(
             child,
@@ -596,6 +665,8 @@ def run_simulation(
             first_play_urgency_reduction,
             use_first_play_urgency_prior_mass,
             use_first_play_urgency_at_root_only,
+            q_value_normalization_weight,
+            use_q_value_normalization_at_root_only,
             False,
         )
 
@@ -623,6 +694,12 @@ def run_simulation_batch(
     use_first_play_urgency_at_root_only: bool = (
         SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
     ),
+    q_value_normalization_weight: float = (
+        SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
+    ),
+    use_q_value_normalization_at_root_only: bool = (
+        SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
+    ),
 ) -> None:
     reservation_counts: dict[int, int] = {}
     search_paths: list[list[SearchNode]] = []
@@ -643,6 +720,11 @@ def run_simulation_batch(
                     node is root,
                 ),
                 use_first_play_urgency_prior_mass,
+                resolve_q_value_normalization_weight(
+                    q_value_normalization_weight,
+                    use_q_value_normalization_at_root_only,
+                    node is root,
+                ),
             )
             search_path.append(node)
 
@@ -744,6 +826,12 @@ def run_search_simulations(
     use_first_play_urgency_at_root_only: bool = (
         SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
     ),
+    q_value_normalization_weight: float = (
+        SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
+    ),
+    use_q_value_normalization_at_root_only: bool = (
+        SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
+    ),
 ) -> None:
     remaining_simulation_count = simulation_count
 
@@ -760,6 +848,8 @@ def run_search_simulations(
             first_play_urgency_reduction,
             use_first_play_urgency_prior_mass,
             use_first_play_urgency_at_root_only,
+            q_value_normalization_weight,
+            use_q_value_normalization_at_root_only,
         )
         remaining_simulation_count -= 1
 
@@ -781,6 +871,8 @@ def run_search_simulations(
             first_play_urgency_reduction,
             use_first_play_urgency_prior_mass,
             use_first_play_urgency_at_root_only,
+            q_value_normalization_weight,
+            use_q_value_normalization_at_root_only,
         )
         remaining_simulation_count -= batch_simulation_count
 
@@ -802,6 +894,12 @@ def select_search_move(
     use_first_play_urgency_at_root_only: bool = (
         SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY
     ),
+    q_value_normalization_weight: float = (
+        SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
+    ),
+    use_q_value_normalization_at_root_only: bool = (
+        SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
+    ),
 ) -> int:
     root = SearchNode(game_state=game_state, prior=1)
     run_search_simulations(
@@ -818,6 +916,10 @@ def select_search_move(
         ),
         use_first_play_urgency_at_root_only=(
             use_first_play_urgency_at_root_only
+        ),
+        q_value_normalization_weight=q_value_normalization_weight,
+        use_q_value_normalization_at_root_only=(
+            use_q_value_normalization_at_root_only
         ),
     )
 
@@ -860,6 +962,12 @@ class MokaSearchSession:
         ),
         root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
         root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
+        q_value_normalization_weight: float = (
+            SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
+        ),
+        use_q_value_normalization_at_root_only: bool = (
+            SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
+        ),
     ) -> None:
         self.evaluator = evaluator
         self.exploration = exploration
@@ -884,6 +992,10 @@ class MokaSearchSession:
         )
         self.root_branch_count = root_branch_count
         self.root_policy_temperature = root_policy_temperature
+        self.q_value_normalization_weight = q_value_normalization_weight
+        self.use_q_value_normalization_at_root_only = (
+            use_q_value_normalization_at_root_only
+        )
         self.root: SearchNode | None = None
 
     def align_root(self, game_state: GameState) -> SearchNode:
@@ -995,6 +1107,8 @@ class MokaSearchSession:
             self.first_play_urgency_reduction,
             self.use_first_play_urgency_prior_mass,
             self.use_first_play_urgency_at_root_only,
+            self.q_value_normalization_weight,
+            self.use_q_value_normalization_at_root_only,
         )
         ordered_visit_counts = sorted(
             (
@@ -1028,6 +1142,8 @@ class MokaSearchSession:
                     self.first_play_urgency_reduction,
                     self.use_first_play_urgency_prior_mass,
                     self.use_first_play_urgency_at_root_only,
+                    self.q_value_normalization_weight,
+                    self.use_q_value_normalization_at_root_only,
                 )
 
         if not root.children:
@@ -1109,6 +1225,12 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
         ),
         root_branch_count: int = SEARCH_ROOT_BRANCH_COUNT,
         root_policy_temperature: float = SEARCH_ROOT_POLICY_TEMPERATURE,
+        q_value_normalization_weight: float = (
+            SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
+        ),
+        use_q_value_normalization_at_root_only: bool = (
+            SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
+        ),
     ) -> None:
         super().__init__(
             evaluator=evaluator,
@@ -1132,6 +1254,10 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
             ),
             root_branch_count=root_branch_count,
             root_policy_temperature=root_policy_temperature,
+            q_value_normalization_weight=q_value_normalization_weight,
+            use_q_value_normalization_at_root_only=(
+                use_q_value_normalization_at_root_only
+            ),
         )
         self.candidate_count = candidate_count
 
@@ -1159,6 +1285,8 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                 self.first_play_urgency_reduction,
                 self.use_first_play_urgency_prior_mass,
                 self.use_first_play_urgency_at_root_only,
+                self.q_value_normalization_weight,
+                self.use_q_value_normalization_at_root_only,
             )
             root_evaluation_count += 1
 
@@ -1207,6 +1335,8 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                     self.first_play_urgency_reduction,
                     self.use_first_play_urgency_prior_mass,
                     self.use_first_play_urgency_at_root_only,
+                    self.q_value_normalization_weight,
+                    self.use_q_value_normalization_at_root_only,
                 )
 
             remaining_simulation_count -= (

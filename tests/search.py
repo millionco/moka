@@ -11,6 +11,7 @@ from go_model.search import (
     expand_node_with_evaluation,
     prune_root_children,
     resolve_first_play_urgency_reduction,
+    resolve_q_value_normalization_weight,
     run_search_simulations,
     select_child,
 )
@@ -47,6 +48,46 @@ class SearchTest(unittest.TestCase):
             get_search_simulation_count(GameState(move_count=80), 64, 0, 60),
             64,
         )
+
+    def test_q_normalization_can_overcome_small_raw_value_scale(self) -> None:
+        parent = SearchNode(GameState(), 1, visit_count=2)
+        better_value_child = SearchNode(
+            GameState(),
+            0.01,
+            visit_count=1,
+            value_sum=-0.2,
+        )
+        higher_prior_child = SearchNode(
+            GameState(),
+            0.99,
+            visit_count=1,
+            value_sum=-0.19,
+        )
+        parent.children = {
+            0: better_value_child,
+            1: higher_prior_child,
+        }
+
+        raw_value_child = select_child(parent, exploration=0.1)
+        normalized_value_child = select_child(
+            parent,
+            exploration=0.1,
+            q_value_normalization_weight=1,
+        )
+
+        self.assertIs(raw_value_child, higher_prior_child)
+        self.assertIs(normalized_value_child, better_value_child)
+
+    def test_q_normalization_can_apply_at_root_only(self) -> None:
+        root_weight = resolve_q_value_normalization_weight(0.5, True, True)
+        descendant_weight = resolve_q_value_normalization_weight(
+            0.5,
+            True,
+            False,
+        )
+
+        self.assertEqual(root_weight, 0.5)
+        self.assertEqual(descendant_weight, 0)
 
     def test_batched_search_preserves_requested_visit_count(self) -> None:
         evaluator = UniformEvaluator()

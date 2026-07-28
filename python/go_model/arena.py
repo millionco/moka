@@ -32,6 +32,8 @@ from go_model.config import (
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
+    SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY,
+    SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
@@ -216,6 +218,12 @@ def run_arena(
     late_simulation_start_move_count: int = (
         SEARCH_LATE_SIMULATION_START_MOVE_COUNT
     ),
+    q_value_normalization_weight: float = (
+        SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
+    ),
+    use_q_value_normalization_at_root_only: bool = (
+        SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
+    ),
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -293,6 +301,12 @@ def run_arena(
                     ),
                     root_branch_count=root_branch_count,
                     root_policy_temperature=root_policy_temperature,
+                    q_value_normalization_weight=(
+                        q_value_normalization_weight
+                    ),
+                    use_q_value_normalization_at_root_only=(
+                        use_q_value_normalization_at_root_only
+                    ),
                 )
                 if sequential_halving_candidate_count > 0
                 else MokaSearchSession(
@@ -327,6 +341,12 @@ def run_arena(
                     ),
                     root_branch_count=root_branch_count,
                     root_policy_temperature=root_policy_temperature,
+                    q_value_normalization_weight=(
+                        q_value_normalization_weight
+                    ),
+                    use_q_value_normalization_at_root_only=(
+                        use_q_value_normalization_at_root_only
+                    ),
                 )
             )
             if simulation_count > 0
@@ -441,6 +461,15 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--search-value-weight",
         type=float,
         default=SEARCH_PUCT_VALUE_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--search-q-normalization-weight",
+        type=float,
+        default=SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--search-q-normalization-root-only",
+        action="store_true",
     )
     argument_parser.add_argument(
         "--search-fpu-reduction",
@@ -574,6 +603,8 @@ def main() -> None:
         arguments.root_policy_temperature,
         arguments.late_simulations,
         arguments.late_simulation_start_move,
+        arguments.search_q_normalization_weight,
+        arguments.search_q_normalization_root_only,
     )
 
 

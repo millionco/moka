@@ -2080,3 +2080,33 @@ The predeclared screen runner-up was evaluated on the same two 100-game confirma
 |      **Total** |    **75** |  **12** |    **76** |  **12** |
 
 Every win completed normally. Fifty-six visits added one completed win without increasing caps, model bytes, or browser payload. It is accepted for browser validation.
+
+## 2026-07-28 — Sibling-Q normalization
+
+### Method
+
+Moka's visited sibling values were optionally min-max normalized before PUCT selection, then blended with their raw values. The method used only Moka's own value estimates and did not change the model, evaluation count, legal moves, or final visit-count selection.
+
+The implementation is disabled by default and supports all-node or root-only normalization. Regression tests verify that normalization can amplify a small value difference, that root-only mode disables the transform below the root, and that the unchanged default retains raw values.
+
+### Screen
+
+On 20 fresh games from opening offset 1,530,000, all settings used 56 visits, one-leaf expansion, root symmetry, exploration 2.0, FPU 0.25, and full branching:
+
+| Normalization | Blend | Wins | Caps |
+| ------------- | ----: | ---: | ---: |
+| Disabled      |  0.00 |    8 |    0 |
+| All nodes     |  0.25 |    8 |    2 |
+| All nodes     |  0.50 |   13 |    2 |
+| All nodes     |  1.00 |    4 |    3 |
+| Root only     |  0.25 |    9 |    1 |
+| Root only     |  0.50 |    6 |    2 |
+| Root only     |  1.00 |    5 |    1 |
+
+The 0.50 all-node blend was frozen as the only large screen gain. It split six Black and seven White wins, with no cap-awarded wins.
+
+### Fresh confirmation
+
+On 100 untouched games from opening offset 1,540,000, the disabled control scored 45 wins with four caps. The frozen 0.50 all-node candidate scored 36 wins with ten caps. Every win completed normally.
+
+Sibling-Q normalization lost nine completed games and added six caps. It was rejected after the first confirmation block and was never added to the browser.
