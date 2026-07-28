@@ -16,8 +16,12 @@ from go_model.reweight import (
     calculate_counterfactual_critical_weights,
     calculate_counterfactual_regret_weights,
     calculate_rollout_regret_weights,
+    calculate_rollout_regret_critical_weights,
 )
-from go_model.train import calculate_listwise_policy_loss
+from go_model.train import (
+    calculate_listwise_policy_loss,
+    normalize_sample_weights,
+)
 
 
 class UniformTeacher:
@@ -38,6 +42,12 @@ class FeatureLogitModel:
 
 
 class GroupRelativePolicyOptimizationTests(unittest.TestCase):
+    def test_zero_sample_weights_remain_finite(self) -> None:
+        normalized_weights = normalize_sample_weights(mx.zeros(8))
+
+        self.assertTrue(bool(mx.all(mx.isfinite(normalized_weights)).item()))
+        self.assertEqual(float(mx.sum(normalized_weights).item()), 0)
+
     def test_same_color_games_use_independent_group_advantages(self) -> None:
         game_ids = np.repeat(np.arange(16, dtype=np.int32), 2)
         rewards = np.repeat(
@@ -242,6 +252,36 @@ class GroupRelativePolicyOptimizationTests(unittest.TestCase):
             weights,
             np.asarray([0.25, 1.75, 0.25], dtype=np.float32),
         )
+
+    def test_rollout_regret_critical_weights_keep_material_errors(
+        self,
+    ) -> None:
+        policies = np.asarray(
+            [
+                [0.8, 0.2],
+                [0.7, 0.3],
+                [0.6, 0.4],
+            ],
+            dtype=np.float32,
+        )
+        q_values = np.asarray(
+            [
+                [0.7, 0.6],
+                [0.8, 0.4],
+                [0.5, -0.5],
+            ],
+            dtype=np.float32,
+        )
+        q_weights = np.ones_like(q_values)
+
+        weights = calculate_rollout_regret_critical_weights(
+            policies,
+            q_values,
+            q_weights,
+            np.asarray([1, 1, 1]),
+        )
+
+        np.testing.assert_array_equal(weights, [0, 1, 4])
 
 
 if __name__ == "__main__":

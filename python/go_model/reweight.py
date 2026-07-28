@@ -19,6 +19,7 @@ from go_model.config import (
     REWEIGHT_COUNTERFACTUAL_CRITICAL_MODE,
     REWEIGHT_MODES,
     REWEIGHT_ROLLOUT_REGRET_MODE,
+    REWEIGHT_ROLLOUT_REGRET_CRITICAL_MODE,
 )
 from go_model.model import MokaNetwork, create_moka_network
 
@@ -179,6 +180,36 @@ def calculate_rollout_regret_weights(
     ).astype(np.float32)
 
 
+def calculate_rollout_regret_critical_weights(
+    policies: np.ndarray,
+    q_values: np.ndarray,
+    q_weights: np.ndarray,
+    rollout_moves: np.ndarray,
+) -> np.ndarray:
+    row_indexes = np.arange(len(policies))
+    teacher_moves = np.argmax(policies, axis=1)
+    teacher_values = q_values[row_indexes, teacher_moves]
+    rollout_values = q_values[row_indexes, rollout_moves]
+    is_rollout_value_available = (
+        q_weights[row_indexes, rollout_moves] > 0
+    )
+    regrets = teacher_values - rollout_values
+    is_significant = (
+        is_rollout_value_available
+        & (regrets >= COUNTERFACTUAL_REGRET_SIGNIFICANCE_THRESHOLD)
+    )
+    is_winner_flipping = (
+        is_significant
+        & (teacher_values > 0)
+        & (rollout_values < 0)
+    )
+    return np.where(
+        is_winner_flipping,
+        COUNTERFACTUAL_REGRET_MAXIMUM_WEIGHT,
+        is_significant.astype(np.float32),
+    ).astype(np.float32)
+
+
 def reweight_dataset(
     dataset_path: Path,
     checkpoint_path: Path,
@@ -212,6 +243,13 @@ def reweight_dataset(
             dataset["q_values"].astype(np.float32),
             dataset["counterfactual_values"].astype(np.float32),
         )
+    elif mode == REWEIGHT_ROLLOUT_REGRET_CRITICAL_MODE:
+        weights = calculate_rollout_regret_critical_weights(
+            policies,
+            dataset["q_values"].astype(np.float32),
+            dataset["q_weights"].astype(np.float32),
+            dataset["rollout_moves"].astype(np.int64),
+        )
     elif mode == REWEIGHT_ROLLOUT_REGRET_MODE:
         weights = calculate_rollout_regret_weights(
             policies,
@@ -240,7 +278,10 @@ def reweight_dataset(
             batch_size,
         )
     output_values = {name: dataset[name] for name in dataset.files}
-    if mode == REWEIGHT_COUNTERFACTUAL_CRITICAL_MODE:
+    if mode in (
+        REWEIGHT_COUNTERFACTUAL_CRITICAL_MODE,
+        REWEIGHT_ROLLOUT_REGRET_CRITICAL_MODE,
+    ):
         hard_policies = np.zeros_like(policies)
         hard_policies[
             np.arange(len(policies)),

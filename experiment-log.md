@@ -3257,3 +3257,94 @@ The incumbent scored 3.1611 loss, 38.0% top-move agreement, and 0.6015 value MAE
 On 20 fresh exact-INT8 games from opening offset 2,590,000, the incumbent and both unique candidates scored eight wins, with three Black wins, five White wins, and zero caps. The candidates changed pass counts but not game outcomes. They were rejected without confirmation.
 
 This experiment shows that top-move disagreement greatly overstates actual search mistakes: only about one in 25 reached roots has b18 regret of at least 0.2. The rollout-move and regret instrumentation remains because it enables a larger targeted corpus without changing ordinary collection or training defaults. The accepted checkpoint, exact 111,920-byte INT8 artifact, runtime search, and Million website remain unchanged.
+
+## 2026-07-28 — Selective exact-artifact regret correction
+
+### Proxy gate
+
+A larger regret corpus is useful only if expensive b18 analysis can be concentrated without hiding mistakes the proxy cannot recognize. The existing 2,116-root corpus was replayed with b6 action regret for Moka's actual searched move. Selecting the highest-regret 12.5% within each game recovered:
+
+| Minimum b18 regret | Positive roots | Proxy recall | Proxy precision |
+| -----------------: | -------------: | -----------: | --------------: |
+|               0.05 |            156 |        28.8% |           16.9% |
+|               0.10 |            123 |        32.5% |           15.0% |
+|               0.20 |             86 |        31.4% |           10.1% |
+|               0.40 |             44 |        29.5% |            4.9% |
+
+The continuous b6/b18 regret correlation was 0.251. At the material 0.2 threshold, the proxy recovered about 2.5 times as many mistakes as uniform 12.5% selection. The scaled collector therefore fixed its b18 budget at 25% of Moka turns: half proxy-ranked and half uniformly sampled.
+
+### Exact deployment corpus
+
+The earlier corrected corpus used the accepted float checkpoint for rollout moves. Production uses the exact INT8 artifact. The scaled run removed that mismatch:
+
+- exact-dequantized accepted INT8 checkpoint
+- 256 deterministic Moka-versus-b6 games
+- alternating colors
+- 64 Moka search visits per move
+- isolated opening offset 3,000,000
+- Moka decision turns only
+- 12.5% highest b6 action regret and 12.5% uniform turns per game
+- 64 native b18 visits per selected root
+
+The corpus contains 2,181 roots from all 256 games and is 844,414 compressed bytes. Its SHA-256 is `0a46d240aa9240f4652f0cad53cb7056715343295def0c1d10f7c9d38482359f`.
+
+B18 evaluated Moka's selected move on 82.3% of roots. Moka selected the b18 top move on 36.8%. The selected set contained 153 roots at regret 0.2 or greater, 7.02% of all labels versus 4.06% in the unselected corpus. Mean covered regret doubled from 0.0306 to 0.0607.
+
+|      Split | Roots | Regret ≥ 0.2 |
+| ---------: | ----: | -----------: |
+|      Train | 1,742 |          116 |
+| Validation |   209 |           17 |
+|       Test |   230 |           20 |
+
+The continuous regret archive had SHA-256 `e398611d6760bc0487a01be461b6fb7a1ba4714ed36c79d8212d965b903eaaeb`.
+
+### Policy-only quantization-aware training
+
+Post-training export had repeatedly rounded small policy-only updates into ineffective INT8 changes. The QAT path now supports a frozen trunk: it initializes the complete quantized evaluator from the deployment model, updates only trainable quantized tensors during differentiation, and leaves every frozen tensor exact. Fully trainable QAT behavior is unchanged.
+
+Three one-epoch linear-policy QAT candidates used continuous regret weights, learning rates 0.000010 or 0.000020, optional 25% hard-target mixing, policy preservation weight 0.25, and both accepted search corpora as replay. Exact test loss was 2.9009–2.9013 versus 2.9004 for the incumbent. All retained 33.5% top-move agreement.
+
+On 20 fresh games from opening offset 2,610,000, the incumbent and all candidates scored six wins with zero caps. Continuous regret QAT was rejected.
+
+### Critical regret targets
+
+A critical mode keeps only roots where b18 regret is at least 0.2, uses the b18 top move as a hard target, weights ordinary material errors one, and weights winner-flipping errors four. The archive contains 153 material roots, including 51 winner flips. Training has 116 material roots and 37 winner flips. Its SHA-256 is `8045cab154d82ab63922539909a6c354561cfdacf38136dc88ce92994473fcac`.
+
+Repeating a sparse archive eight times exposed an all-zero sample-weight batch. Sample-weight normalization now clamps its denominator, making such a batch contribute zero weighted task loss rather than NaN. A regression test verifies finite zero output.
+
+Three exact policy-linear QAT candidates replayed the critical corpus four or eight times:
+
+| Candidate    | Critical replay | Learning rate | Exact test loss | Test move |
+| ------------ | --------------: | ------------: | --------------: | --------: |
+| Conservative |              4× |      0.000020 |          2.3468 |     33.5% |
+| Higher rate  |              4× |      0.000050 |          2.3484 |     33.5% |
+| More replay  |              8× |      0.000020 |          2.3476 |     33.5% |
+| Incumbent    |               — |             — |          2.3567 |     33.5% |
+
+Every exported candidate remained exactly 111,920 bytes. Exact tensor comparison found changes only in `policy_linear.weight` and `policy_linear.bias`; the trunk and value estimator stayed bit-identical.
+
+On 20 fresh games from opening offset 2,620,000:
+
+| Artifact     | Wins | Black | White | Caps |
+| ------------ | ---: | ----: | ----: | ---: |
+| Incumbent    |    7 |     5 |     2 |    0 |
+| 4×, 0.000020 |    8 |     6 |     2 |    0 |
+| 4×, 0.000050 |   11 |     5 |     6 |    0 |
+| 8×, 0.000020 |   10 |     6 |     4 |    0 |
+
+The unique 11-win candidate was frozen.
+
+### Confirmation and adjudication
+
+The first two untouched blocks left the candidate ahead by only three games and split directionally, so one fixed third block was declared before promotion. Acceptance required the candidate to remain ahead across all 300 games without a cap regression.
+
+| Opening offset | Incumbent wins | Candidate wins | Incumbent caps | Candidate caps |
+| -------------: | -------------: | -------------: | -------------: | -------------: |
+|      2,630,000 |             37 |             36 |              0 |              0 |
+|      2,640,000 |             40 |             44 |              0 |              0 |
+|      2,650,000 |             43 |             34 |              0 |              0 |
+|      **Total** |        **120** |        **114** |          **0** |          **0** |
+
+The screen and second-block gains did not generalize. The adjudication reversed the close lead, and the frozen candidate lost six games over 300. It is rejected.
+
+Selective b6 regret successfully enriched consequential b18 mistakes, policy-only QAT preserved exact deployment constraints, and critical targets improved exact held-out loss. None proved a strength gain. The accepted checkpoint, exact 111,920-byte INT8 artifact, runtime search, and Million website remain unchanged.

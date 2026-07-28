@@ -46,6 +46,13 @@ from go_model.quantization import fake_quantize_int8_parameters
 from go_model.symmetry import apply_batch_board_symmetry, apply_batch_spatial_symmetry
 
 
+def normalize_sample_weights(sample_weights: mx.array) -> mx.array:
+    return sample_weights / mx.maximum(
+        mx.mean(sample_weights),
+        REVERSE_KL_EPSILON,
+    )
+
+
 def calculate_listwise_policy_loss(
     policy_logits: mx.array,
     policy_targets: mx.array,
@@ -72,7 +79,7 @@ def calculate_listwise_policy_loss(
             remaining_logits,
         )
 
-    normalized_weights = sample_weights / mx.mean(sample_weights)
+    normalized_weights = normalize_sample_weights(sample_weights)
     return mx.mean(sample_losses * normalized_weights) / LISTWISE_POLICY_RANK_COUNT
 
 
@@ -139,7 +146,7 @@ def calculate_loss(
         axis=1,
         keepdims=True,
     )
-    normalized_weights = sample_weights / mx.mean(sample_weights)
+    normalized_weights = normalize_sample_weights(sample_weights)
     forward_policy_loss = -mx.mean(
         mx.sum(policy_targets * log_probabilities, axis=1) * normalized_weights
     )
@@ -656,8 +663,7 @@ def train(
             "Policy-convolution freezing requires trunk freezing."
         )
     if use_int8_quantization_aware_training and (
-        freeze_trunk
-        or train_global_adapter_only
+        train_global_adapter_only
         or soft_policy_loss_weight > 0
         or use_auxiliary_network
         or use_q_auxiliary
@@ -683,6 +689,11 @@ def train(
     )
 
     if quantized_model is not None:
+        quantized_model.update(
+            fake_quantize_int8_parameters(model.parameters())
+        )
+        mx.eval(quantized_model.parameters())
+
         def calculate_quantized_loss(
             parameters: dict,
             *loss_arguments: object,
