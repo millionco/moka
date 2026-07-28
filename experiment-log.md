@@ -3457,3 +3457,49 @@ Two disjoint 100-game blocks compared the frozen candidate with production:
 Production split 38 Black and 40 White wins. The candidate split 41 Black and 40 White wins. Every game completed normally. Candidate runtimes were 282.9 and 279.3 seconds; production runtimes were 283.6 and 280.6 seconds.
 
 The candidate adds three completed wins without a cap or runtime regression. Geometric root-policy weight 0.125 is accepted as Moka's search default. Model bytes, parameter count, teacher access during play, and the Million website remain unchanged.
+
+## 2026-07-28 — Post-consensus value and exploration retune
+
+### Value weight
+
+The accepted 0.125 geometric consensus changed Moka's root priors, so the policy–value balance was screened again. The exact accepted artifact, KataGo b6c96 opponent, 64 visits, exploration 2.0, FPU 0.25, full branching, and maximum-visit selection were fixed.
+
+On 20 fresh games from opening offset 2,740,000:
+
+| Value weight | Wins | Black | White | Caps |
+| -----------: | ---: | ----: | ----: | ---: |
+|        1.000 |   10 |     5 |     5 |    0 |
+|        1.125 |   10 |     5 |     5 |    0 |
+|        1.250 |    7 |     3 |     4 |    0 |
+|        1.375 |   10 |     4 |     6 |    0 |
+|        1.500 |    6 |     4 |     2 |    0 |
+
+Three alternatives tied. Selecting among them after observing the screen would add selection bias, so none advanced. Production retains value weight 1.25.
+
+### Exploration screen
+
+With value weight 1.25 fixed, a preplanned exploration screen used 20 fresh games from opening offset 2,750,000:
+
+| Exploration | Wins | Black | White | Caps |
+| ----------: | ---: | ----: | ----: | ---: |
+|        1.50 |    9 |     5 |     4 |    0 |
+|        1.75 |    9 |     3 |     6 |    0 |
+|        2.00 |   10 |     4 |     6 |    0 |
+|        2.25 |   10 |     5 |     5 |    0 |
+|        2.50 |   13 |     6 |     7 |    0 |
+
+Exploration 2.5 was frozen as the unique screen leader.
+
+### Exploration confirmation
+
+Two disjoint 100-game blocks compared the frozen candidate with production:
+
+| Opening offset | Production wins | Candidate wins | Production caps | Candidate caps |
+| -------------: | --------------: | -------------: | --------------: | -------------: |
+|      2,760,000 |              38 |             36 |               1 |              0 |
+|      2,770,000 |              43 |             37 |               0 |              0 |
+|      **Total** |          **81** |         **73** |           **1** |          **0** |
+
+Production's cap was awarded to Moka by the final area score. Excluding that award leaves 80 normally completed production wins, still seven more than the candidate. The 2.5 candidate regressed on both blocks and is rejected.
+
+Moka retains exploration 2.0 and value weight 1.25. The accepted 0.125 geometric blend, model bytes, and Million website remain unchanged.
