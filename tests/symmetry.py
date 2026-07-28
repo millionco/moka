@@ -41,6 +41,26 @@ class SymmetryTest(unittest.TestCase):
                 1.1,
             )
 
+    def test_trimmed_policy_aggregation_suppresses_symmetry_outlier(
+        self,
+    ) -> None:
+        policies = [
+            np.asarray([0.99, 0.01], dtype=np.float32),
+            np.asarray([0.5, 0.5], dtype=np.float32),
+            np.asarray([0.5, 0.5], dtype=np.float32),
+        ]
+
+        arithmetic_policy = aggregate_symmetry_policies(policies, 0)
+        trimmed_policy = aggregate_symmetry_policies(policies, 0, 1)
+
+        self.assertGreater(arithmetic_policy[0], trimmed_policy[0])
+        self.assertTrue(
+            np.allclose(
+                trimmed_policy,
+                np.asarray([0.5, 0.5], dtype=np.float32),
+            )
+        )
+
     def test_policy_and_features_transform_together(self) -> None:
         features = np.zeros(
             (BOARD_SIZE, BOARD_SIZE, INPUT_PLANE_COUNT),

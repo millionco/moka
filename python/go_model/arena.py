@@ -38,6 +38,7 @@ from go_model.config import (
     SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
+    SEARCH_ROOT_SYMMETRY_TRIMMED_POLICY_WEIGHT,
     SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
 )
 from go_model.features import (
@@ -228,6 +229,9 @@ def run_arena(
     root_symmetry_geometric_policy_weight: float = (
         SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
     ),
+    root_symmetry_trimmed_policy_weight: float = (
+        SEARCH_ROOT_SYMMETRY_TRIMMED_POLICY_WEIGHT
+    ),
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -256,6 +260,9 @@ def run_arena(
             use_symmetry_ensemble=True,
             symmetry_geometric_policy_weight=(
                 root_symmetry_geometric_policy_weight
+            ),
+            symmetry_trimmed_policy_weight=(
+                root_symmetry_trimmed_policy_weight
             ),
         )
         if use_root_symmetry_ensemble
@@ -537,6 +544,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
     )
     argument_parser.add_argument(
+        "--root-symmetry-trimmed-policy-weight",
+        type=float,
+        default=SEARCH_ROOT_SYMMETRY_TRIMMED_POLICY_WEIGHT,
+    )
+    argument_parser.add_argument(
         "--root-branches",
         type=int,
         default=SEARCH_ROOT_BRANCH_COUNT,
@@ -621,6 +633,7 @@ def main() -> None:
         arguments.search_q_normalization_weight,
         arguments.search_q_normalization_root_only,
         arguments.root_symmetry_geometric_policy_weight,
+        arguments.root_symmetry_trimmed_policy_weight,
     )
 
 

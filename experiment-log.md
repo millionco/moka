@@ -2146,3 +2146,19 @@ Two disjoint 100-game blocks compared the frozen blend with arithmetic averaging
 Every win completed normally. The arithmetic runs took 269.9 and 264.7 seconds; the geometric runs took 263.7 and 264.0 seconds. The candidate added two completed wins, removed three caps, and introduced no measurable runtime cost across the 200-game confirmation.
 
 The 0.25 geometric consensus blend is accepted for the browser.
+
+## 2026-07-28 — Trimmed symmetry outliers
+
+The accepted 0.25 geometric blend was held fixed. A research-only robust aggregate sorted the eight aligned probabilities independently for every move, discarded the highest and lowest orientation, averaged the remaining six, and blended that trimmed policy with the accepted aggregate. It changed no model evaluation, value, legal move, search budget, or payload tensor.
+
+On 20 fresh games from opening offset 1,580,000:
+
+| Trimmed blend | Wins | Caps |
+| ------------: | ---: | ---: |
+|          0.00 |    7 |    0 |
+|          0.25 |    6 |    0 |
+|          0.50 |    6 |    0 |
+|          0.75 |    6 |    0 |
+|          1.00 |    7 |    0 |
+
+Every win completed normally. Partial trimming lost one completed game, while a fully trimmed policy only tied the accepted control. No setting advanced to confirmation. The browser remains on the 0.25 geometric consensus blend without trimming.

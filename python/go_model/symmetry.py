@@ -41,26 +41,43 @@ def invert_policy_symmetry(
 def aggregate_symmetry_policies(
     policies: list[np.ndarray],
     geometric_policy_weight: float,
+    trimmed_policy_weight: float = 0,
 ) -> np.ndarray:
     if not 0 <= geometric_policy_weight <= 1:
         raise ValueError("Geometric policy weight must be between zero and one.")
 
+    if not 0 <= trimmed_policy_weight <= 1:
+        raise ValueError("Trimmed policy weight must be between zero and one.")
+
     policy_array = np.asarray(policies, dtype=np.float32)
     arithmetic_policy = np.mean(policy_array, axis=0)
 
-    if geometric_policy_weight == 0:
-        return arithmetic_policy
+    if geometric_policy_weight > 0:
+        mean_log_policy = np.mean(
+            np.log(np.maximum(policy_array, np.finfo(np.float32).tiny)),
+            axis=0,
+        )
+        geometric_policy = np.exp(mean_log_policy - np.max(mean_log_policy))
+        geometric_policy /= np.sum(geometric_policy)
+        blended_policy = (
+            (1 - geometric_policy_weight) * arithmetic_policy
+            + geometric_policy_weight * geometric_policy
+        )
+    else:
+        blended_policy = arithmetic_policy
 
-    mean_log_policy = np.mean(
-        np.log(np.maximum(policy_array, np.finfo(np.float32).tiny)),
-        axis=0,
-    )
-    geometric_policy = np.exp(mean_log_policy - np.max(mean_log_policy))
-    geometric_policy /= np.sum(geometric_policy)
-    blended_policy = (
-        (1 - geometric_policy_weight) * arithmetic_policy
-        + geometric_policy_weight * geometric_policy
-    )
+    if trimmed_policy_weight > 0:
+        if policy_array.shape[0] < 3:
+            raise ValueError("Trimmed policy aggregation requires three policies.")
+
+        sorted_policy = np.sort(policy_array, axis=0)
+        trimmed_policy = np.mean(sorted_policy[1:-1], axis=0)
+        trimmed_policy /= np.sum(trimmed_policy)
+        blended_policy = (
+            (1 - trimmed_policy_weight) * blended_policy
+            + trimmed_policy_weight * trimmed_policy
+        )
+
     return blended_policy / np.sum(blended_policy)
 
 
