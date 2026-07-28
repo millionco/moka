@@ -4257,3 +4257,48 @@ Each challenger played the same 100 deterministic openings as its accepted contr
 All three screen gains reversed on their untouched confirmations. Exploration 1.75 lost five games, FPU 0.625 lost three, and value weight 1.125 lost two. No run reached the move cap, so cap adjudication cannot explain the result.
 
 Exploration 2.0, FPU reduction 0.5, and value weight 1.25 remain accepted. The checkpoint, browser artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Full-symmetry adaptive visit allocation
+
+### Ceiling screen
+
+The earlier adaptive-search experiment used the old canonical 256- and 512-visit players. It was re-audited under the accepted exact INT8 artifact, 64-visit base, full descendant symmetry, exploration 2.0, value weight 1.25, and FPU reduction 0.5. A root received additional simulations only when its top-two visit margin was below the configured threshold.
+
+On 20 fresh games from opening offset 3,840,000, the threshold remained at 10%:
+
+| Maximum visits | Wins | Black | White | Caps | Runtime |
+| -------------: | ---: | ----: | ----: | ---: | ------: |
+|       Fixed 64 |    8 |     4 |     4 |    0 |   60.5s |
+|             80 |    9 |     4 |     5 |    0 |   60.6s |
+|             96 |    9 |     5 |     4 |    0 |   63.6s |
+|            128 |    8 |     4 |     4 |    0 |   72.0s |
+
+Maximum 80 tied the win leader at the lowest runtime and advanced to threshold calibration.
+
+### Margin screen
+
+On 20 fresh games from opening offset 3,850,000:
+
+| Maximum / margin | Wins | Black | White | Caps | Runtime |
+| :--------------- | ---: | ----: | ----: | ---: | ------: |
+| Fixed 64         |   12 |     7 |     5 |    0 |   55.2s |
+| 80 / 5%          |   12 |     6 |     6 |    0 |   54.4s |
+| 80 / 10%         |   12 |     7 |     5 |    0 |   55.6s |
+| 80 / 15%         |   13 |     7 |     6 |    0 |   57.5s |
+| 80 / 20%         |   13 |     7 |     6 |    0 |   57.5s |
+
+Margins 15% and 20% tied. The smaller 15% intervention was frozen before confirmation.
+
+### Paired confirmation
+
+Two untouched 100-game blocks produced:
+
+| Opening offset | Fixed wins | Adaptive wins | Fixed Black / White | Adaptive Black / White | Fixed / adaptive caps | Fixed / adaptive runtime |
+| -------------: | ---------: | ------------: | :------------------ | :--------------------- | --------------------: | -----------------------: |
+|      3,860,000 |         53 |            56 | 26 / 27             | 28 / 28                |                 0 / 0 |          284.7s / 302.3s |
+|      3,870,000 |         46 |            44 | 26 / 20             | 23 / 21                |                 0 / 0 |          276.7s / 282.0s |
+|      **Total** |     **99** |       **100** | **52 / 47**         | **51 / 49**            |             **0 / 0** |      **561.4s / 584.3s** |
+
+The first-block three-game gain reversed by two games in the second block. A one-game aggregate edge with opposite block outcomes and 4.1% more runtime is insufficient evidence of stronger play. Adaptive 64-to-80 search at a 15% margin is rejected.
+
+Fixed 64 visits remain accepted. The model, artifact, search defaults, and Million website remain unchanged.
