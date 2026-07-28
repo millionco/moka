@@ -3081,3 +3081,43 @@ The experimental path blended 0%, 25%, 50%, 75%, or 100% of the refreshed symmet
 On 20 fresh games from opening offset 2,430,000, every blend scored exactly five wins: four as Black and one as White, with zero caps. Runtime ranged from 56.2 to 57.4 seconds. Pass counts changed slightly, proving the path was active, but no setting changed a game result.
 
 The complete value-refresh path was removed after the screen. Both experiments leave the accepted checkpoint, exact INT8 artifact, and accepted search unchanged. No Million website files were touched.
+
+## 2026-07-28 — Root and descendant PUCT exploration split
+
+### Hypothesis
+
+Moka's real-move root uses an eight-way averaged policy, while every descendant uses a single-view policy. Both levels nevertheless share exploration coefficient 2.0. Tuning them separately might allocate the fixed 64 visits more effectively without changing the model, inference count, payload, or legal moves.
+
+An opt-in root coefficient retained the existing coefficient at descendants. On 20 fresh games from opening offset 2,440,000:
+
+| Root exploration | Wins | Black | White | Caps |
+| ---------------: | ---: | ----: | ----: | ---: |
+|             0.75 |   12 |     6 |     6 |    0 |
+|             1.25 |   10 |     6 |     4 |    1 |
+|             1.50 |   10 |     4 |     6 |    1 |
+|             2.00 |   14 |     6 |     8 |    0 |
+|             2.50 |   11 |     6 |     5 |    0 |
+
+The accepted root coefficient 2.0 remained the clear joint leader.
+
+The complementary screen fixed root exploration at 2.0 and varied only descendants. On 20 new games from opening offset 2,450,000:
+
+| Descendant exploration | Wins | Black | White | Caps |
+| ---------------------: | ---: | ----: | ----: | ---: |
+|                   0.75 |   12 |     7 |     5 |    0 |
+|                   1.25 |    9 |     5 |     4 |    0 |
+|                   1.50 |   10 |     5 |     5 |    0 |
+|                   2.00 |    7 |     4 |     3 |    0 |
+|                   2.50 |   10 |     5 |     5 |    0 |
+
+Descendant coefficient 0.75 was frozen as the unique five-win screen improvement.
+
+| Opening offset | Control wins | Candidate wins | Control caps | Candidate caps |
+| -------------: | -----------: | -------------: | -----------: | -------------: |
+|      2,460,000 |           48 |             42 |            0 |              0 |
+|      2,470,000 |           41 |             38 |            0 |              0 |
+|      **Total** |       **89** |         **80** |        **0** |          **0** |
+
+The screen gain reversed on both independent blocks. The frozen candidate lost nine games in aggregate. Its 559.2-second runtime was lower than the control's 579.0 seconds because its games ended sooner, not because it changed the fixed inference budget.
+
+Separate root and descendant exploration is rejected, and the entire runtime path was removed. The accepted coefficient remains 2.0 at every node. The checkpoint, exact INT8 artifact, 64-visit budget, and Million website remain unchanged.
