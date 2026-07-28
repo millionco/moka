@@ -3789,3 +3789,65 @@ On 20 new games from opening offset 2,930,000:
 Branch supervision recovered one game over one matched root-only control and tied the incumbent, but no candidate beat production. No candidate advanced to confirmation, and no further intensity was tested.
 
 Teacher-correction side branches provide clean sequential coverage but do not improve this policy-linear continuation recipe. All candidates are rejected. The opt-in generator remains available for future architectures; the accepted artifact, search, and Million website remain unchanged.
+
+## 2026-07-28 — Moka-only blunder prediction and selective intervention
+
+### Loss profile
+
+The exact accepted artifact was evaluated in all eight aligned symmetries on the existing 2,181-root selective b18 corpus from opening offset 3,000,000. A b18-critical mistake remained defined as at least 0.2 searched value regret for Moka's actual 64-visit move.
+
+The corpus contained 7.02% critical roots. Jensen–Shannon disagreement among Moka's legal normalized symmetry policies was only a weak predictor: the highest-disagreement 20% contained 29.4% of critical roots at a 10.3% critical rate.
+
+A predeclared screen spent extra search only at high-disagreement roots:
+
+| Configuration      | Wins | Black | White | Caps | Extensions |
+| :----------------- | ---: | ----: | ----: | ---: | ---------: |
+| Accepted 64 visits |   11 |     7 |     4 |    0 |          0 |
+| Fixed 72 visits    |    9 |     4 |     5 |    0 |          0 |
+| 64→80, top 20%     |   10 |     6 |     4 |    0 |        120 |
+| 64→96, top 20%     |   11 |     6 |     5 |    0 |        123 |
+| 64→96, top 10%     |   10 |     5 |     5 |    0 |         75 |
+
+No disagreement schedule beat the control.
+
+### Frozen multivariate risk score
+
+A class-balanced logistic score combined only signals available from Moka's existing root evaluation: symmetry policy disagreement, value spread, top-move votes, accepted-policy confidence and entropy, view dispersion, board occupancy and stone balance, mean value, value magnitude, canonical-value deviation, and top-move agreement indicators.
+
+The score was fitted once on the 2,181-root offset-3,000,000 corpus. The untouched 1,077-root, 128-visit auxiliary corpus from opening offset 3,300,000 supplied the independent proxy test.
+
+| Corpus    | Critical rate | ROC AUC | Top-20% critical rate | Top-20% recall |
+| :-------- | ------------: | ------: | --------------------: | -------------: |
+| Fit       |         7.02% |   0.774 |                16.97% |          48.4% |
+| Untouched |         6.04% |   0.717 |                13.49% |          44.6% |
+
+The untouched top 10% had a 15.22% critical rate and recovered 21.5% of critical roots. The score therefore generalized as a blunder predictor even though no runtime intervention had yet been shown to help.
+
+On the same fresh 20-game screen used for the fixed controls:
+
+| Risk schedule  | Wins | Black | White | Caps | Extensions |
+| :------------- | ---: | ----: | ----: | ---: | ---------: |
+| 64→80, top 20% |   10 |     6 |     4 |    0 |        107 |
+| 64→96, top 20% |   12 |     7 |     5 |    0 |        106 |
+| 64→96, top 10% |   12 |     7 |     5 |    0 |         55 |
+
+The top-10% schedule was frozen because it tied the screen lead with half as many extensions.
+
+On 100 new paired games from opening offset 2,960,000, accepted Moka and the frozen schedule each won 40 games with zero caps. The candidate extended 258 roots and took 280.2 seconds versus 267.4 seconds for the control. More visits at predicted mistakes changed the color split but did not improve aggregate strength, so the search extension was rejected.
+
+### Selective policy routing
+
+Deep-critical seed 182 previously improved both of its first standalone confirmation blocks but failed later confirmation. It differs from accepted Moka only in the linear policy tensors. A second intervention retained the accepted trunk, value, descendant evaluator, and 64-visit tree, but substituted seed 182's root policy only when the frozen risk score fired.
+
+On 20 fresh games from opening offset 2,970,000:
+
+| Root policy            | Wins | Black | White | Caps | Routed roots |
+| :--------------------- | ---: | ----: | ----: | ---: | -----------: |
+| Accepted               |    8 |     4 |     4 |    0 |            0 |
+| Seed 182 at every root |    6 |     3 |     3 |    0 |          651 |
+| Seed 182, risk top 20% |    9 |     4 |     5 |    0 |          143 |
+| Seed 182, risk top 10% |    9 |     4 |     5 |    0 |           72 |
+
+The top-10% route was frozen as the smaller screen leader. On 100 untouched paired games from opening offset 2,980,000, accepted Moka won 41 games and the routed candidate won 39. Both had zero caps. The candidate routed 261 roots and took 270.8 seconds versus 268.6 seconds for the control.
+
+The independent risk score identifies materially bad roots, but neither extra visits nor routing to a globally unstable policy improved confirmed play. Both runtime paths were removed after rejection. This separates detection from correction: future work should use the score to improve training coverage or candidate generation, not to spend more of the same search or switch between the same two policies. The accepted model, 64-visit search, 111,920-byte artifact, and Million website remain unchanged.
