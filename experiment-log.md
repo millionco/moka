@@ -2170,3 +2170,30 @@ The accepted geometric policy remained fixed while the root evaluator optionally
 On 20 fresh games from opening offset 1,590,000, trimmed-value weights 0, 0.25, 0.50, 0.75, and 1.00 all reproduced the same three wins, one cap, Black/White split, pass counts, and capped-position counts. Every win completed normally.
 
 The transform was behaviorally inert across the complete range and did not advance to confirmation. The browser retains arithmetic symmetry-value averaging.
+
+## 2026-07-28 — Top-eight symmetry rank consensus
+
+### Method
+
+Each aligned symmetry policy ranked its eight highest-probability moves. Linear Borda weights from eight through one were summed across orientations and normalized into a rank policy. The candidate blended this distribution with the accepted 0.25-geometric aggregate. The method uses only Moka's existing eight root evaluations and does not change its value, legal moves, tree budget, or runtime teacher access.
+
+### Screen
+
+On 20 fresh games from opening offset 1,600,000:
+
+| Rank blend | Wins | Caps |
+| ---------: | ---: | ---: |
+|       0.00 |    5 |    1 |
+|       0.10 |    6 |    1 |
+|       0.25 |    5 |    1 |
+|       0.50 |    7 |    1 |
+|       0.75 |    7 |    1 |
+|       1.00 |    6 |    1 |
+
+Every win completed normally. Weight 0.50 was frozen as the smallest joint screen leader.
+
+### Fresh confirmation
+
+On 100 untouched games from opening offset 1,610,000, the accepted geometric control scored 27 wins with eight caps. The frozen rank candidate scored 32 wins with ten caps. Every win completed normally; the control took 270.4 seconds and the candidate took 273.4 seconds.
+
+Rank consensus added five completed wins but also two unfinished games. It failed the predeclared no-cap-regression gate after the first confirmation block and was rejected without retuning or a second block. The browser remains unchanged.

@@ -73,6 +73,21 @@ class SymmetryTest(unittest.TestCase):
         self.assertAlmostEqual(arithmetic_value, 0.225)
         self.assertAlmostEqual(trimmed_value, 0.45)
 
+    def test_rank_policy_aggregation_rewards_orientation_votes(
+        self,
+    ) -> None:
+        policies = [
+            np.asarray([0.99, 0.01], dtype=np.float32),
+            np.asarray([0.49, 0.51], dtype=np.float32),
+            np.asarray([0.49, 0.51], dtype=np.float32),
+        ]
+
+        arithmetic_policy = aggregate_symmetry_policies(policies, 0, 0, 0, 1)
+        rank_policy = aggregate_symmetry_policies(policies, 0, 0, 1, 1)
+
+        self.assertGreater(arithmetic_policy[0], arithmetic_policy[1])
+        self.assertGreater(rank_policy[1], rank_policy[0])
+
     def test_policy_and_features_transform_together(self) -> None:
         features = np.zeros(
             (BOARD_SIZE, BOARD_SIZE, INPUT_PLANE_COUNT),

@@ -36,6 +36,8 @@ from go_model.config import (
     SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_ROOT_BRANCH_COUNT,
+    SEARCH_ROOT_SYMMETRY_RANK_MOVE_COUNT,
+    SEARCH_ROOT_SYMMETRY_RANK_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_TRIMMED_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_TRIMMED_VALUE_WEIGHT,
@@ -84,6 +86,10 @@ class MokaEvaluator:
         symmetry_trimmed_value_weight: float = (
             SEARCH_ROOT_SYMMETRY_TRIMMED_VALUE_WEIGHT
         ),
+        symmetry_rank_policy_weight: float = (
+            SEARCH_ROOT_SYMMETRY_RANK_POLICY_WEIGHT
+        ),
+        symmetry_rank_move_count: int = SEARCH_ROOT_SYMMETRY_RANK_MOVE_COUNT,
     ) -> None:
         self.model = model
         self.use_symmetry_ensemble = use_symmetry_ensemble
@@ -95,6 +101,8 @@ class MokaEvaluator:
         )
         self.symmetry_trimmed_policy_weight = symmetry_trimmed_policy_weight
         self.symmetry_trimmed_value_weight = symmetry_trimmed_value_weight
+        self.symmetry_rank_policy_weight = symmetry_rank_policy_weight
+        self.symmetry_rank_move_count = symmetry_rank_move_count
         self.cache: dict[
             tuple[bytes, int, int, tuple[int, ...]],
             tuple[np.ndarray, float],
@@ -227,6 +235,8 @@ class MokaEvaluator:
                             aligned_policies,
                             self.symmetry_geometric_policy_weight,
                             self.symmetry_trimmed_policy_weight,
+                            self.symmetry_rank_policy_weight,
+                            self.symmetry_rank_move_count,
                         ),
                         aggregate_symmetry_values(
                             value_array[symmetry_start:symmetry_end],
