@@ -3959,3 +3959,65 @@ The accepted float-shadow checkpoint now has SHA-256 `58abe149b8dd9cc1cb5f869f8c
 The previously frozen blunder-risk score remained valid after promotion. On the untouched offset-3,300,000 proxy corpus, ROC AUC increased from 0.717 to 0.724 while top-20% critical rate remained 13.49% and recall remained 44.6%.
 
 The Million website remains unchanged.
+
+## 2026-07-28 — Post-promotion calibration
+
+### Search constants
+
+The promoted symmetry-distilled artifact was used for every control and candidate. Each screen used 20 fresh games at 64 visits with identical openings and zero capped games.
+
+| Parameter                    | Candidates                     | Accepted result                                                                                                                  |
+| :--------------------------- | :----------------------------- | :------------------------------------------------------------------------------------------------------------------------------- |
+| Root geometric policy weight | 0, 0.0625, 0.125, 0.1875, 0.25 | The frozen 0.125 remained accepted. Zero and 0.0625 each won eight games, while 0.125 won seven; there was no unique challenger. |
+| PUCT exploration             | 1.5, 1.75, 2, 2.25, 2.5        | The frozen 2 remained accepted with eight wins. Only 2.5 tied it, so there was no unique challenger.                             |
+| Value weight                 | 1, 1.125, 1.25, 1.375, 1.5     | Weight 1 led the screen with 11 wins versus eight for the frozen 1.25.                                                           |
+
+The value-weight challenger advanced to 100 fresh games from opening offset 3,070,000. Weight 1 won 34 games, split 16 Black and 18 White, while the frozen 1.25 won 38, split 17 Black and 21 White. Both had zero caps. Weight 1 was rejected.
+
+The accepted search remains 64 visits, root geometric policy weight 0.125, exploration 2, value weight 1.25, and first-play urgency reduction 0.25.
+
+### Second-generation consensus targets
+
+The promoted model generated a new set of eight-symmetry consensus targets:
+
+| Opening offset | Compressed bytes | Target archive SHA-256                                             |
+| -------------: | ---------------: | :----------------------------------------------------------------- |
+|      3,000,000 |        1,125,645 | `c517b98e9938a57582e3ed041566c9b0b08907cab2e8a23a0ac528595c3419dd` |
+|      3,100,000 |        1,099,182 | `4ee81747444ff51d4b7b11db707f3fcd51296c6865920bfc01b46390b3b0e8dd` |
+|      3,500,000 |        1,040,385 | `97fe558381d8e8a13e6361bb43d4be7216fbc0981a6373e1df5d8674447fbbc0` |
+
+Full-network exact-QAT seeds 263–265 reused the promoted recipe: one epoch, learning rate 0.000010, policy preservation weight 0.25, and all three target corpora. On the 3,500,000 consensus test bucket, the incumbent had loss 2.2795, move agreement 75.6%, and value error 0.1214. Every candidate regressed: their losses were 2.2926–2.2960, move agreement was 74.7%–75.1%, and value error was 0.1329–0.1401.
+
+All three also regressed on the independent b18 test buckets at opening offsets 3,300,000 and 3,500,000. They were rejected offline without spending arena games. Repeated self-distillation from the already-distilled student amplified its approximation errors instead of adding new information.
+
+## 2026-07-28 — Full-model interpolation
+
+### Hypothesis
+
+The promoted model gained 13 White wins and lost one Black win relative to its predecessor. A convex parameter blend could retain more of the predecessor's Black behavior while preserving the promoted model's symmetry improvements.
+
+Exact INT8-aware blends used 25%, 50%, and 75% of the promoted float-shadow parameters. Their exact-dequantized SHA-256 digests were:
+
+| Promoted-model fraction | Exact-dequantized SHA-256                                          |
+| ----------------------: | :----------------------------------------------------------------- |
+|                     25% | `45d0be6c9071be5677dda11b229ca7102466798536fdc52bd1fe93b44dfb767b` |
+|                     50% | `4bb7e376e2420964e2b2ecc39023fb9df0d09fda872cd2c02356d37c497345e9` |
+|                     75% | `e2263151fbf7dfba1ffe94cf394e30bcda0617d0967e8731f0952ccaf819734a` |
+
+On the fresh consensus test bucket, all three blends remained between the two endpoint models. The 75% blend had the best blend loss at 2.2856 and the best move agreement at 77.3%, but no blend consistently improved the independent b18 buckets.
+
+### Arena
+
+On 20 fresh games from opening offset 3,090,000, the promoted model and the 75% blend each won 10 games, the 50% blend won nine, and the 25% blend uniquely led with 11. All had zero caps. The 25% blend was frozen for confirmation.
+
+Two untouched paired 100-game blocks produced:
+
+| Opening offset | Promoted wins | Blend wins | Promoted Black / White | Blend Black / White |      Caps |
+| -------------: | ------------: | ---------: | :--------------------- | :------------------ | --------: |
+|      3,100,000 |            42 |         44 | 22 / 20                | 22 / 22             |     0 / 0 |
+|      3,110,000 |            36 |         35 | 19 / 17                | 20 / 15             |     0 / 0 |
+|      **Total** |        **78** |     **79** | **41 / 37**            | **42 / 37**         | **0 / 0** |
+
+The blend's one-game aggregate edge was smaller than its opposite block-to-block swings. It regressed in the second block and did not retain the promoted model's demonstrated White advantage. The result is indistinguishable from arena variance, so the blend is rejected.
+
+The accepted model, search, browser artifact, and Million website remain unchanged.
