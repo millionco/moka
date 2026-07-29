@@ -4716,3 +4716,61 @@ Exploration 1.75 advanced as the unique screen leader. Two disjoint 100-game blo
 Exploration 1.75 improved both independent blocks, added six Black wins while preserving White wins, and introduced no cap. Runtime increased 0.6%. It is accepted as the research default. The checkpoint, 111,920-byte browser artifact, and Million website remain unchanged.
 
 The promoted default and explicit `--search-exploration 1.75` reproduced the same two-game result at opening offset 4,290,000, including six Moka passes, two KataGo passes, and zero caps.
+
+## 2026-07-28 — FPU under exploration 1.75
+
+First-play urgency was retuned because exploration 1.75 changed the relative prior bonus assigned to unvisited children. On 20 fresh games from opening offset 4,300,000:
+
+| FPU reduction | Wins | Black | White | Caps |
+| ------------: | ---: | ----: | ----: | ---: |
+|         0.250 |    7 |     3 |     4 |    0 |
+|         0.375 |    6 |     2 |     4 |    0 |
+|         0.500 |    8 |     2 |     6 |    0 |
+|         0.625 |    9 |     4 |     5 |    0 |
+|         0.750 |   10 |     5 |     5 |    0 |
+
+Reduction 0.75 advanced as the unique screen leader. On 100 untouched games from opening offset 4,310,000, the accepted reduction 0.5 won 52 games, split 26 Black and 26 White, with zero caps in 280.9 seconds. Reduction 0.75 won 48, split 24 Black and 24 White, with zero caps in 277.1 seconds.
+
+The candidate lost four completed games and regressed equally as both colors. It is rejected. FPU reduction 0.5 remains accepted.
+
+## 2026-07-28 — Opponent width under exploration 1.75
+
+Opponent width was rescreened because exploration 1.75 changed how quickly PUCT exhausts the retained reply set. On 20 fresh games from opening offset 4,320,000:
+
+| Opponent width | Wins | Black | White | Caps |
+| -------------: | ---: | ----: | ----: | ---: |
+|              2 |   10 |     6 |     4 |    0 |
+|              3 |   14 |     8 |     6 |    0 |
+|              4 |   14 |     8 |     6 |    0 |
+|              5 |    9 |     5 |     4 |    0 |
+|              6 |   11 |     6 |     5 |    0 |
+
+Widths 3 and 4 tied exactly for the lead, including their color split and cap count. Selecting the smaller width after observing a tie would add selection bias, so no candidate advanced. Opponent width 4 remains accepted.
+
+## 2026-07-28 — Root symmetry blend under accepted pruning
+
+The geometric root-policy blend was retuned under width 4 and exploration 1.75. On 20 fresh games from opening offset 4,330,000:
+
+| Geometric weight | Wins | Black | White | Caps |
+| ---------------: | ---: | ----: | ----: | ---: |
+|           0.0000 |    8 |     3 |     5 |    0 |
+|           0.0625 |    8 |     3 |     5 |    0 |
+|           0.1250 |    8 |     3 |     5 |    0 |
+|           0.1875 |    9 |     4 |     5 |    0 |
+|           0.2500 |    9 |     4 |     5 |    0 |
+
+Weights 0.1875 and 0.25 tied exactly for the lead. No candidate advanced after the tie. The accepted root geometric weight remains 0.125.
+
+## 2026-07-28 — Descendant symmetry blend under accepted pruning
+
+The descendant geometric-policy blend was screened independently because it controls every evaluated leaf prior rather than only the real root. On 20 fresh games from opening offset 4,340,000:
+
+| Geometric weight | Wins | Black | White | Caps |
+| ---------------: | ---: | ----: | ----: | ---: |
+|           0.0000 |   11 |     3 |     8 |    0 |
+|           0.0625 |   11 |     3 |     8 |    0 |
+|           0.1250 |   12 |     5 |     7 |    0 |
+|           0.1875 |   11 |     5 |     6 |    0 |
+|           0.2500 |   10 |     4 |     6 |    0 |
+
+The accepted descendant geometric weight 0.125 remained the unique leader. No candidate advanced. This cycle therefore retains FPU reduction 0.5, opponent width 4, root geometric weight 0.125, and descendant geometric weight 0.125. The model, browser artifact, and Million website remain unchanged.
