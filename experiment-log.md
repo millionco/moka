@@ -4774,3 +4774,74 @@ The descendant geometric-policy blend was screened independently because it cont
 |           0.2500 |   10 |     4 |     6 |    0 |
 
 The accepted descendant geometric weight 0.125 remained the unique leader. No candidate advanced. This cycle therefore retains FPU reduction 0.5, opponent width 4, root geometric weight 0.125, and descendant geometric weight 0.125. The model, browser artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Causal reanalysis selection
+
+### Hypothesis
+
+The existing reanalysis selector measures the value drift from the parent position to Moka's played child. A more causal selector can compare the stronger b18 teacher's preferred child directly with Moka's actual child. This should prioritize decisions where the teacher sees a concrete better alternative rather than positions whose value merely changed after a move.
+
+### Controlled corpus
+
+Both selectors used the same 128 Moka-versus-b6 games, seed 284, opening offset 4,350,000, Moka turns only, 25% selection rate, 128 b18 visits, and 1,034 retained roots. The causal corpus has SHA-256 `b8fd7ef0bbba77e10ab3d5c40ecda305b26aa6a3b387d1400e53590501255ebb`; the legacy corpus has SHA-256 `467a38088c2a53bb8e7b4a4ff9474235325347c63e92ebc64c8eb60c24285626`.
+
+| Diagnostic           | Causal selector | Existing selector |
+| :------------------- | --------------: | ----------------: |
+| b18 coverage         |          86.94% |            88.59% |
+| b18 top-move match   |          32.11% |            38.97% |
+| Regret at least 0.05 |           8.80% |             9.86% |
+| Regret at least 0.10 |           6.77% |             7.93% |
+| Regret at least 0.20 |           5.03% |             5.90% |
+| Regret at least 0.40 |           2.90% |             3.77% |
+| Mean finite regret   |         0.04885 |           0.05495 |
+| Winner flips         |              19 |                24 |
+
+The selections overlapped on 697 roots; each selector contributed roughly 330 unique roots, for Jaccard overlap 0.510. Despite its cleaner interpretation, the causal score was worse on every stronger-teacher diagnostic. It is rejected before training. The generated dataset now records each root's selection score so future reanalysis corpora remain auditable without changing training input.
+
+## 2026-07-28 — Opponent progressive widening
+
+### Hypothesis
+
+The accepted fixed opponent width 4 spends visits across all retained replies immediately. Prior-guided progressive widening can retain the same four replies but initially expose only the highest-prior two or three, unlocking the remainder as the node earns visits. This uses the existing model and fixed 64-evaluation budget without teacher access or extra inference.
+
+### Screen
+
+The exact accepted artifact and all accepted search settings were fixed. Five schedules used the same 20 fresh paired games from opening offset 4,360,000:
+
+| Initial replies | Visits per unlocked reply | Wins | Black | White | Caps |
+| --------------: | ------------------------: | ---: | ----: | ----: | ---: |
+|               4 |                  Disabled |   10 |     7 |     3 |    0 |
+|               2 |                         2 |   11 |     8 |     3 |    0 |
+|               2 |                         4 |   11 |     7 |     4 |    0 |
+|               2 |                         8 |   10 |     6 |     4 |    0 |
+|               3 |                         4 |   10 |     7 |     3 |    0 |
+
+Two candidates tied one game above control with different color splits. Neither was a unique screen winner, and selecting between them after observing the tie would add selection bias. Progressive widening is rejected and its unused runtime path is removed. Fixed opponent width 4 remains accepted; the checkpoint and browser artifact remain unchanged.
+
+## 2026-07-28 — Descendant exploration under opponent pruning
+
+Opponent width 4 and root exploration 1.75 changed the accepted tree after the last root/descendant exploration audit. The split was rescreened on the same exact artifact, fixed 64-evaluation budget, and 20 fresh paired games from opening offset 4,370,000:
+
+| Descendant exploration | Wins | Black | White | Caps |
+| ---------------------: | ---: | ----: | ----: | ---: |
+|                   1.00 |    5 |     2 |     3 |    0 |
+|                   1.25 |    9 |     4 |     5 |    0 |
+|                   1.50 |   11 |     6 |     5 |    0 |
+|         Inherited 1.75 |   11 |     7 |     4 |    0 |
+|                   2.00 |   10 |     7 |     3 |    0 |
+
+The only challenger tied the accepted player while trading one Black win for one White win. No candidate advanced. Descendant exploration continues to inherit the accepted root coefficient 1.75.
+
+## 2026-07-28 — Visit budget under opponent pruning
+
+The fixed budget was last calibrated before opponent width 4 and exploration 1.75 changed tree allocation. Budgets around the accepted 64 evaluations were screened on 20 fresh paired games from opening offset 4,380,000:
+
+| Evaluations | Wins | Black | White | Caps | Runtime |
+| ----------: | ---: | ----: | ----: | ---: | ------: |
+|          48 |    8 |     4 |     4 |    0 |   58.5s |
+|          56 |    6 |     3 |     3 |    0 |   66.8s |
+|          64 |   10 |     4 |     6 |    0 |   78.0s |
+|          72 |    7 |     2 |     5 |    0 |   79.6s |
+|          80 |   10 |     5 |     5 |    0 |   87.6s |
+
+Eighty evaluations tied the accepted player while taking 12.3% longer on the same games. Every other candidate lost at least two completed games. Fixed 64-evaluation search remains accepted.

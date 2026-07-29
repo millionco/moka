@@ -692,6 +692,7 @@ def create_search_dataset(
     q_weights: list[np.ndarray] = []
     values: list[float] = []
     game_ids: list[int] = []
+    selection_scores: list[float] = []
     child_features: list[np.ndarray] = []
     child_values: list[float] = []
     child_weights: list[float] = []
@@ -766,6 +767,9 @@ def create_search_dataset(
                 q_weights.append(targets.q_weights)
                 values.append(targets.value)
                 game_ids.append(game_id)
+                selection_scores.append(
+                    game_surprises[game_id][turn_number]
+                )
                 absolute_turn_number = int(response["turnNumber"])
                 absolute_turn_numbers.append(absolute_turn_number)
                 rollout_move = game_moves[game_id][absolute_turn_number]
@@ -838,6 +842,7 @@ def create_search_dataset(
                 q_weights.append(targets.q_weights)
                 values.append(targets.value)
                 game_ids.append(game_id)
+                selection_scores.append(selection_scores[parent_index])
                 absolute_turn_numbers.append(-1)
                 rollout_moves.append(int(np.argmax(targets.policy)))
                 branch_parent_indexes.append(parent_index)
@@ -969,6 +974,10 @@ def create_search_dataset(
         "game_ids": np.asarray(game_ids, dtype=np.int32),
         "policies": np.asarray(policies, dtype=np.float16),
         "rollout_moves": np.asarray(rollout_moves, dtype=np.int16),
+        "selection_scores": np.asarray(
+            selection_scores,
+            dtype=np.float16,
+        ),
         "moka_moves": moka_moves,
         "counterfactual_values": counterfactual_values.astype(np.float16),
         "q_values": np.asarray(q_values, dtype=np.float16),
