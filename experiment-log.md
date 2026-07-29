@@ -4970,11 +4970,11 @@ Three incremental adapter-only candidates started from the promoted model. They 
 
 Every candidate also lowered loss on the separate 128- and 256-visit test splits. All three entered the fixed 20-game screen at opening offset 4,490,000:
 
-| Player         | Wins | Black | White | Caps | Runtime |
-| :------------- | ---: | ----: | ----: | ---: | ------: |
-| Control        |    9 |     6 |     3 |    1 |   57.2s |
-| Adapter 3e-6   |    8 |     6 |     2 |    0 |   55.7s |
-| Adapter 1e-5   |    8 |     5 |     3 |    0 |   57.7s |
-| Adapter 3e-5   |    8 |     7 |     1 |    0 |   55.8s |
+| Player       | Wins | Black | White | Caps | Runtime |
+| :----------- | ---: | ----: | ----: | ---: | ------: |
+| Control      |    9 |     6 |     3 |    1 |   57.2s |
+| Adapter 3e-6 |    8 |     6 |     2 |    0 |   55.7s |
+| Adapter 1e-5 |    8 |     5 |     3 |    0 |   57.7s |
+| Adapter 3e-5 |    8 |     7 |     1 |    0 |   55.8s |
 
 The deeper-label family is rejected without confirmation. Exact preservation remains in the trainer because it aligns the regularizer with the deployed player, but no checkpoint or browser artifact changes.
