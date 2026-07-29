@@ -8,6 +8,7 @@ export {
   getLegalMoves,
   isGameOver,
   playMove,
+  removeDeadStones,
   selectHighestLegalMove,
 } from "./game";
 export { GoModelRuntime } from "./runtime";

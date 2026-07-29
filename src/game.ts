@@ -321,6 +321,20 @@ const getAreaScore = (gameState: GoGameState) => {
   return score;
 };
 
+const removeDeadStones = (gameState: GoGameState, deadMoves: number[]) => {
+  const nextState = copyGameState(gameState);
+
+  for (const deadMove of deadMoves) {
+    if (deadMove < 0 || deadMove >= GO_BOARD_AREA) {
+      throw new Error(`Dead move must be between 0 and ${GO_BOARD_AREA - 1}.`);
+    }
+
+    nextState.board[deadMove] = GO_EMPTY_COLOR;
+  }
+
+  return nextState;
+};
+
 const isGameOver = (gameState: GoGameState) =>
   gameState.consecutivePassCount >= GO_GAME_OVER_PASS_COUNT ||
   gameState.moveCount >= GO_MAXIMUM_MOVE_COUNT;
@@ -332,5 +346,6 @@ export {
   getLegalMoves,
   isGameOver,
   playMove,
+  removeDeadStones,
   selectHighestLegalMove,
 };

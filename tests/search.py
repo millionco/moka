@@ -7,9 +7,10 @@ from go_model.arena import (
     create_argument_parser,
     get_search_simulation_count,
     get_search_value_weight,
+    should_accept_opponent_pass,
     should_resign_selected_pass,
 )
-from go_model.board import GameState, play_move
+from go_model.board import GameState, get_area_score, play_move
 from go_model.config import POLICY_MOVE_COUNT
 from go_model.search import (
     MokaSearchSession,
@@ -46,6 +47,25 @@ class FreeUniformEvaluator(UniformEvaluator):
     evaluation_count = 0
 
 
+class FixedValueEvaluator(UniformEvaluator):
+    def __init__(self, value: float) -> None:
+        self.value = value
+        self.evaluation_count = 0
+
+    def evaluate(self, game_state: GameState) -> tuple[np.ndarray, float]:
+        self.evaluation_count += 1
+        return (
+            np.full(POLICY_MOVE_COUNT, 1 / POLICY_MOVE_COUNT),
+            self.value,
+        )
+
+    def evaluate_batch(
+        self,
+        game_states: list[GameState],
+    ) -> list[tuple[np.ndarray, float]]:
+        return [self.evaluate(game_state) for game_state in game_states]
+
+
 class BiasedPolicyModel:
     def __call__(self, features: mx.array) -> tuple[mx.array, mx.array]:
         policy_logits = np.zeros(
@@ -60,6 +80,22 @@ class BiasedPolicyModel:
 
 
 class SearchTest(unittest.TestCase):
+    def test_terminal_search_uses_network_value_for_unsettled_stones(
+        self,
+    ) -> None:
+        game_state = GameState(
+            board=np.ones((9, 9), dtype=np.int8),
+            consecutive_pass_count=2,
+        )
+        root = SearchNode(game_state, 1)
+        evaluator = FixedValueEvaluator(-0.75)
+
+        run_search_simulations(root, evaluator, 3)
+
+        self.assertGreater(get_area_score(game_state), 0)
+        self.assertEqual(root.visit_count, 3)
+        self.assertEqual(root.mean_value, -0.75)
+
     def test_child_value_targets_keep_visited_child_perspective(
         self,
     ) -> None:
@@ -253,6 +289,29 @@ class SearchTest(unittest.TestCase):
         )
         self.assertFalse(
             should_resign_selected_pass(game_state, 0, 40),
+        )
+
+    def test_opponent_pass_acceptance_uses_network_adjudication(
+        self,
+    ) -> None:
+        game_state = GameState(
+            board=np.ones((9, 9), dtype=np.int8),
+            next_color=-1,
+            move_count=80,
+            consecutive_pass_count=1,
+        )
+
+        self.assertFalse(
+            should_accept_opponent_pass(
+                game_state,
+                FixedValueEvaluator(0.75),
+            ),
+        )
+        self.assertTrue(
+            should_accept_opponent_pass(
+                game_state,
+                FixedValueEvaluator(-0.75),
+            ),
         )
 
     def test_late_search_simulation_count_only_applies_after_cutoff(self) -> None:

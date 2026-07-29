@@ -339,12 +339,6 @@ class MokaEvaluator:
         ]
 
 
-def get_terminal_value(game_state: GameState) -> float:
-    did_black_win = get_area_score(game_state) > 0
-    did_current_player_win = did_black_win == (game_state.next_color == 1)
-    return 1 if did_current_player_win else -1
-
-
 def blend_search_value(
     game_state: GameState,
     network_value: float,
@@ -394,15 +388,16 @@ def evaluate_rollout_values(
 
         for active_index, rollout_index in enumerate(unresolved_indexes):
             game_state = rollout_states[rollout_index]
+            _, network_value = evaluations[active_index]
 
             if is_game_over(game_state):
                 resolved_values[rollout_index] = (
                     perspective_signs[rollout_index]
-                    * get_terminal_value(game_state)
+                    * network_value
                 )
                 continue
 
-            policy, network_value = evaluations[active_index]
+            policy = evaluations[active_index][0]
 
             if rollout_step == rollout_depth:
                 resolved_values[rollout_index] = (
@@ -784,7 +779,7 @@ def run_simulation(
     child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
 ) -> float:
     if is_game_over(node.game_state):
-        value = get_terminal_value(node.game_state)
+        _, value = evaluator.evaluate(node.game_state)
     elif not node.children:
         policy, network_value = evaluator.evaluate(node.game_state)
         expand_node_with_evaluation(
@@ -947,6 +942,31 @@ def run_simulation_batch(
     evaluations = evaluator.evaluate_batch(
         [node.game_state for node in unevaluated_nodes]
     )
+    terminal_nodes: list[SearchNode] = []
+    terminal_node_identifiers: set[int] = set()
+
+    for search_path in search_paths:
+        leaf_node = search_path[-1]
+        leaf_identifier = id(leaf_node)
+
+        if (
+            is_game_over(leaf_node.game_state)
+            and leaf_identifier not in terminal_node_identifiers
+        ):
+            terminal_nodes.append(leaf_node)
+            terminal_node_identifiers.add(leaf_identifier)
+
+    terminal_evaluations = evaluator.evaluate_batch(
+        [node.game_state for node in terminal_nodes]
+    )
+    terminal_value_by_identifier = {
+        id(node): evaluation[1]
+        for node, evaluation in zip(
+            terminal_nodes,
+            terminal_evaluations,
+            strict=True,
+        )
+    }
 
     for node, evaluation in zip(unevaluated_nodes, evaluations, strict=True):
         expand_node_with_evaluation(
@@ -989,7 +1009,7 @@ def run_simulation_batch(
     for search_path in search_paths:
         leaf_node = search_path[-1]
         value = (
-            get_terminal_value(leaf_node.game_state)
+            terminal_value_by_identifier[id(leaf_node)]
             if is_game_over(leaf_node.game_state)
             else rollout_value_by_identifier[id(leaf_node)]
         )
@@ -1764,6 +1784,8 @@ def select_rollout_move(
         evaluations = evaluator.evaluate_batch(rollout_states)
         next_rollout_states: list[GameState] = []
         next_candidate_indexes: list[int] = []
+        terminal_states: list[GameState] = []
+        terminal_candidate_indexes: list[int] = []
 
         for rollout_index, rollout_state in enumerate(rollout_states):
             rollout_policy, _ = evaluations[rollout_index]
@@ -1798,13 +1820,27 @@ def select_rollout_move(
                 next_candidate_indexes.append(candidate_index)
                 continue
 
-            terminal_state = next_state or rollout_state
-            did_black_win = get_area_score(terminal_state) > 0
-            did_root_player_win = did_black_win == (root_color == 1)
-            candidate_value_sums[candidate_index] += (
-                1 if did_root_player_win else -1
+            terminal_states.append(next_state or rollout_state)
+            terminal_candidate_indexes.append(candidate_index)
+
+        terminal_evaluations = evaluator.evaluate_batch(terminal_states)
+
+        for (
+            terminal_state,
+            terminal_candidate_index,
+            terminal_evaluation,
+        ) in zip(
+            terminal_states,
+            terminal_candidate_indexes,
+            terminal_evaluations,
+            strict=True,
+        ):
+            candidate_value_sums[terminal_candidate_index] += (
+                terminal_evaluation[1]
+                * terminal_state.next_color
+                * root_color
             )
-            candidate_visit_counts[candidate_index] += 1
+            candidate_visit_counts[terminal_candidate_index] += 1
 
         rollout_states = next_rollout_states
         rollout_candidate_indexes = next_candidate_indexes

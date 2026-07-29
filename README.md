@@ -57,7 +57,9 @@ import {
   GoModelWorkerClient,
   createGameState,
   encodeStudentFeatures,
+  getAreaScore,
   playMove,
+  removeDeadStones,
   selectHighestLegalMove,
 } from "/moka/index.js";
 
@@ -97,6 +99,17 @@ The `value` result ranges from `-1` to `1` for the player who was next to move. 
 Map board intersections to move indexes with `row * 9 + column`. Indexes `0` through `80` represent board points in row-major order, starting at the top-left. Index `81` represents a pass. `playMove` returns `null` when a move is illegal.
 
 Call `moka.dispose()` when your page or component no longer needs the model. This terminates the worker and rejects pending requests.
+
+### Adjudicate the final score
+
+Two passes stop play, but stones that both players agree are dead must be removed before area scoring. Pass their move indexes to `removeDeadStones`, then score the returned state:
+
+```js
+const adjudicatedState = removeDeadStones(gameState, deadMoves);
+const blackLead = getAreaScore(adjudicatedState);
+```
+
+`removeDeadStones` returns a copy and leaves the played position unchanged. Positive scores lead for Black; negative scores lead for White, including 7 points of komi.
 
 ### Configure asset security
 

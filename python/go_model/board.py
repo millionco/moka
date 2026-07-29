@@ -143,6 +143,22 @@ def is_game_over(game_state: GameState) -> bool:
     )
 
 
+def remove_dead_stones(
+    game_state: GameState,
+    dead_moves: list[int] | set[int] | tuple[int, ...],
+) -> GameState:
+    next_state = game_state.copy()
+
+    for dead_move in dead_moves:
+        if dead_move < 0 or dead_move >= BOARD_AREA:
+            raise ValueError(f"Dead move must be between 0 and {BOARD_AREA - 1}.")
+
+        dead_row, dead_column = divmod(dead_move, BOARD_SIZE)
+        next_state.board[dead_row, dead_column] = 0
+
+    return next_state
+
+
 def get_area_score(game_state: GameState) -> float:
     black_score = float(np.count_nonzero(game_state.board == 1))
     white_score = float(np.count_nonzero(game_state.board == -1)) + KOMI_POINTS
