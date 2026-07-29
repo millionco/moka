@@ -4642,3 +4642,77 @@ Width 4 improved both independent blocks, adding two Black wins and three White 
 Opponent branch width 4 is accepted as the research default. The 104,129-parameter checkpoint, 111,920-byte browser artifact, and their digests remain unchanged. The Million website remains untouched.
 
 The promoted default and explicit `--opponent-branches 4` reproduced the same two-game result at opening offset 4,200,000: one Moka win as White, one KataGo win, four Moka passes, two KataGo passes, and zero caps.
+
+## 2026-07-28 — Local opponent-width refinement
+
+Widths immediately around the accepted opponent reply width were screened on 20 fresh games from opening offset 4,210,000:
+
+| Opponent branch width | Wins | Black | White | Caps |
+| --------------------: | ---: | ----: | ----: | ---: |
+|                     2 |   10 |     4 |     6 |    0 |
+|                     3 |    9 |     4 |     5 |    0 |
+|                     4 |    7 |     4 |     3 |    0 |
+|                     5 |    8 |     5 |     3 |    0 |
+|                     6 |    8 |     4 |     4 |    0 |
+
+Width 2 advanced as the unique screen leader. Two disjoint 100-game blocks compared it with the accepted width 4:
+
+| Opening offset | Width-4 wins | Width-2 wins | Width-4 Black / White | Width-2 Black / White | Width-4 / width-2 caps |
+| -------------: | -----------: | -----------: | :-------------------- | :-------------------- | ---------------------: |
+|      4,220,000 |           35 |           38 | 22 / 13               | 21 / 17               |                  1 / 1 |
+|      4,230,000 |           49 |           47 | 26 / 23               | 27 / 20               |                  0 / 0 |
+|      **Total** |       **84** |       **85** | **48 / 36**           | **48 / 37**           |              **1 / 1** |
+
+The three-game first-block gain reversed to a two-game loss in the independent second block. A one-game aggregate difference over 200 games is indistinguishable from arena variance, so width 2 is rejected. Opponent width 4 remains accepted.
+
+### Early-game width schedule
+
+A phase schedule retained width 4 normally and used width 2 only before a fixed move threshold. On 20 fresh games from opening offset 4,240,000:
+
+| Early width-2 end move | Wins | Black | White | Caps |
+| ---------------------: | ---: | ----: | ----: | ---: |
+|       Disabled control |   11 |     6 |     5 |    0 |
+|                     20 |    8 |     4 |     4 |    0 |
+|                     30 |    9 |     4 |     5 |    0 |
+|                     40 |    9 |     5 |     4 |    0 |
+|                     50 |    7 |     4 |     3 |    0 |
+
+Every schedule lost at least two completed games. Early width 2 is rejected, and its unused runtime path was removed.
+
+### PUCT value weight under width 4
+
+The policy–value balance was retuned because opponent reply pruning changed the tree topology. On 20 fresh games from opening offset 4,250,000:
+
+| Value weight | Wins | Black | White | Caps |
+| -----------: | ---: | ----: | ----: | ---: |
+|        1.000 |   11 |     8 |     3 |    0 |
+|        1.125 |    8 |     5 |     3 |    0 |
+|        1.250 |   12 |     8 |     4 |    0 |
+|        1.375 |    8 |     6 |     2 |    0 |
+|        1.500 |    9 |     7 |     2 |    0 |
+
+The accepted value weight 1.25 remained the unique leader. No candidate advanced.
+
+### PUCT exploration under width 4
+
+Exploration was retuned with opponent width 4 and value weight 1.25 fixed. On 20 fresh games from opening offset 4,260,000:
+
+| Exploration | Wins | Black | White | Caps |
+| ----------: | ---: | ----: | ----: | ---: |
+|        1.50 |   11 |     4 |     7 |    0 |
+|        1.75 |   12 |     7 |     5 |    0 |
+|        2.00 |   11 |     6 |     5 |    0 |
+|        2.25 |    9 |     6 |     3 |    0 |
+|        2.50 |    8 |     5 |     3 |    0 |
+
+Exploration 1.75 advanced as the unique screen leader. Two disjoint 100-game blocks produced:
+
+| Opening offset | Exploration-2 wins | Exploration-1.75 wins | Control Black / White | Candidate Black / White | Control / candidate caps | Control / candidate runtime |
+| -------------: | -----------------: | --------------------: | :-------------------- | :---------------------- | -----------------------: | --------------------------: |
+|      4,270,000 |                 33 |                    37 | 16 / 17               | 22 / 15                 |                    0 / 0 |             302.1s / 305.3s |
+|      4,280,000 |                 38 |                    40 | 21 / 17               | 21 / 19                 |                    0 / 0 |             287.7s / 287.8s |
+|      **Total** |             **71** |                **77** | **37 / 34**           | **43 / 34**             |                **0 / 0** |         **589.8s / 593.1s** |
+
+Exploration 1.75 improved both independent blocks, added six Black wins while preserving White wins, and introduced no cap. Runtime increased 0.6%. It is accepted as the research default. The checkpoint, 111,920-byte browser artifact, and Million website remain unchanged.
+
+The promoted default and explicit `--search-exploration 1.75` reproduced the same two-game result at opening offset 4,290,000, including six Moka passes, two KataGo passes, and zero caps.

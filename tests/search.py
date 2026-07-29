@@ -88,7 +88,7 @@ class SearchTest(unittest.TestCase):
         )
 
         self.assertEqual(arguments.simulations, 64)
-        self.assertEqual(arguments.search_exploration, 2.0)
+        self.assertEqual(arguments.search_exploration, 1.75)
         self.assertIsNone(arguments.descendant_search_exploration)
         self.assertEqual(arguments.search_child_q_pseudo_count, 0.0)
         self.assertEqual(
