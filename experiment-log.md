@@ -4845,3 +4845,16 @@ The fixed budget was last calibrated before opponent width 4 and exploration 1.7
 |          80 |   10 |     5 |     5 |    0 |   87.6s |
 
 Eighty evaluations tied the accepted player while taking 12.3% longer on the same games. Every other candidate lost at least two completed games. Fixed 64-evaluation search remains accepted.
+
+## 2026-07-28 — Terminal evaluation regression audit
+
+Commit `b1e437e` replaced Tromp-Taylor area outcomes at terminal search nodes with Moka's learned value, and used the same estimate to decide whether to accept an opponent pass. The intent was to approximate dead-stone adjudication, but the arena still scores completed games by area. This made search optimize a different terminal rule from the one that determines wins.
+
+The exact accepted artifact and search settings compared the two implementations on identical fresh paired openings:
+
+| Opening offset | Games | Area-terminal wins | Network-terminal wins | Area Black / White | Network Black / White | Area / network caps |
+| -------------: | ----: | -----------------: | --------------------: | :----------------- | :-------------------- | ------------------: |
+|      4,390,000 |    20 |                 10 |                     9 | 5 / 5              | 4 / 5                 |               0 / 0 |
+|      4,400,000 |   100 |                 42 |                    26 | 21 / 21            | 12 / 14               |               0 / 0 |
+
+The learned-terminal player lost 16 completed games on the frozen 100-game block and regressed as both colors. Terminal search, rollout adjudication, and opponent-pass acceptance are restored to the arena's area rule. The separate dead-stone removal API remains available for user-approved adjudication before scoring; it is not inferred from the compact network. The model and browser artifact remain unchanged.

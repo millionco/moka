@@ -130,7 +130,6 @@ def get_search_value_weight(
 
 def should_accept_opponent_pass(
     game_state: GameState,
-    evaluator: MokaEvaluator,
 ) -> bool:
     if (
         game_state.move_count < MINIMUM_TEACHER_PASS_MOVE_COUNT
@@ -143,8 +142,10 @@ def should_accept_opponent_pass(
     if pass_state is None:
         return False
 
-    _, opponent_value = evaluator.evaluate(pass_state)
-    return opponent_value < 0
+    perspective_area_score = (
+        get_area_score(pass_state) * game_state.next_color
+    )
+    return perspective_area_score > 0
 
 
 def should_resign_selected_pass(
@@ -173,7 +174,7 @@ def select_moka_move(
     random_seed: int,
     search_session: MokaSearchSession | None,
 ) -> int:
-    if should_accept_opponent_pass(game_state, evaluator):
+    if should_accept_opponent_pass(game_state):
         return BOARD_AREA
 
     if rollout_count > 0:

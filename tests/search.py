@@ -80,7 +80,7 @@ class BiasedPolicyModel:
 
 
 class SearchTest(unittest.TestCase):
-    def test_terminal_search_uses_network_value_for_unsettled_stones(
+    def test_terminal_search_uses_area_score_over_network_value(
         self,
     ) -> None:
         game_state = GameState(
@@ -94,7 +94,7 @@ class SearchTest(unittest.TestCase):
 
         self.assertGreater(get_area_score(game_state), 0)
         self.assertEqual(root.visit_count, 3)
-        self.assertEqual(root.mean_value, -0.75)
+        self.assertEqual(root.mean_value, 1)
 
     def test_child_value_targets_keep_visited_child_perspective(
         self,
@@ -291,27 +291,27 @@ class SearchTest(unittest.TestCase):
             should_resign_selected_pass(game_state, 0, 40),
         )
 
-    def test_opponent_pass_acceptance_uses_network_adjudication(
+    def test_opponent_pass_acceptance_uses_area_score(
         self,
     ) -> None:
-        game_state = GameState(
+        losing_game_state = GameState(
             board=np.ones((9, 9), dtype=np.int8),
             next_color=-1,
             move_count=80,
             consecutive_pass_count=1,
         )
+        winning_game_state = GameState(
+            board=np.ones((9, 9), dtype=np.int8),
+            next_color=1,
+            move_count=80,
+            consecutive_pass_count=1,
+        )
 
         self.assertFalse(
-            should_accept_opponent_pass(
-                game_state,
-                FixedValueEvaluator(0.75),
-            ),
+            should_accept_opponent_pass(losing_game_state),
         )
         self.assertTrue(
-            should_accept_opponent_pass(
-                game_state,
-                FixedValueEvaluator(-0.75),
-            ),
+            should_accept_opponent_pass(winning_game_state),
         )
 
     def test_late_search_simulation_count_only_applies_after_cutoff(self) -> None:
