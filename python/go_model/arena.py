@@ -26,6 +26,7 @@ from go_model.config import (
     SEARCH_AREA_VALUE_WEIGHT,
     SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
     SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    SEARCH_CHILD_Q_PSEUDO_COUNT,
     SEARCH_DESCENDANT_PUCT_EXPLORATION,
     SEARCH_DESCENDANT_POLICY_TEMPERATURE,
     SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
@@ -242,6 +243,7 @@ def run_arena(
     descendant_search_exploration: float | None = (
         SEARCH_DESCENDANT_PUCT_EXPLORATION
     ),
+    child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
     search_value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
     search_area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
     search_rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
@@ -400,6 +402,7 @@ def run_arena(
                     candidate_count=sequential_halving_candidate_count,
                     exploration=search_exploration,
                     descendant_exploration=descendant_search_exploration,
+                    child_q_pseudo_count=child_q_pseudo_count,
                     value_weight=search_value_weight,
                     area_value_weight=search_area_value_weight,
                     rollout_depth=search_rollout_depth,
@@ -444,6 +447,7 @@ def run_arena(
                     evaluator=evaluator,
                     exploration=search_exploration,
                     descendant_exploration=descendant_search_exploration,
+                    child_q_pseudo_count=child_q_pseudo_count,
                     value_weight=search_value_weight,
                     area_value_weight=search_area_value_weight,
                     rollout_depth=search_rollout_depth,
@@ -653,6 +657,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_DESCENDANT_PUCT_EXPLORATION,
     )
     argument_parser.add_argument(
+        "--search-child-q-pseudo-count",
+        type=float,
+        default=SEARCH_CHILD_Q_PSEUDO_COUNT,
+    )
+    argument_parser.add_argument(
         "--search-value-weight",
         type=float,
         default=SEARCH_PUCT_VALUE_WEIGHT,
@@ -855,6 +864,7 @@ def main() -> None:
         arguments.rollouts,
         arguments.search_exploration,
         arguments.descendant_search_exploration,
+        arguments.search_child_q_pseudo_count,
         arguments.search_value_weight,
         arguments.search_area_value_weight,
         arguments.search_rollout_depth,

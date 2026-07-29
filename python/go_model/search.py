@@ -24,6 +24,7 @@ from go_model.config import (
     SEARCH_AREA_VALUE_START_MOVE_COUNT,
     SEARCH_AREA_VALUE_RAMP_MOVE_COUNT,
     SEARCH_AREA_VALUE_WEIGHT,
+    SEARCH_CHILD_Q_PSEUDO_COUNT,
     SEARCH_DESCENDANT_PUCT_EXPLORATION,
     SEARCH_DESCENDANT_POLICY_TEMPERATURE,
     SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
@@ -534,6 +535,22 @@ def apply_search_policy_temperature(
     )
 
 
+def blend_child_q_value(
+    child_value: float,
+    parent_value: float,
+    child_visit_count: int,
+    pseudo_count: float,
+) -> float:
+    if pseudo_count < 0:
+        raise ValueError("Child Q pseudo-count must not be negative.")
+    if pseudo_count == 0:
+        return child_value
+
+    return (
+        child_visit_count * child_value + pseudo_count * parent_value
+    ) / (child_visit_count + pseudo_count)
+
+
 def select_child(
     node: SearchNode,
     reservation_counts: dict[int, int] | None = None,
@@ -548,6 +565,7 @@ def select_child(
     q_value_normalization_weight: float = (
         SEARCH_Q_VALUE_NORMALIZATION_WEIGHT
     ),
+    child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
 ) -> SearchNode:
     reservation_counts = reservation_counts or {}
     parent_visit_scale = np.sqrt(
@@ -591,13 +609,23 @@ def select_child(
         effective_child_visit_count = (
             child.visit_count + child_reservation_count
         )
-        child_value = (
+        raw_child_value = (
             node.mean_value - effective_first_play_urgency_reduction
             if (
                 effective_child_visit_count == 0
                 and first_play_urgency_reduction >= 0
             )
             else -child.mean_value
+        )
+        child_value = (
+            blend_child_q_value(
+                raw_child_value,
+                node.mean_value,
+                child.visit_count,
+                child_q_pseudo_count,
+            )
+            if child.visit_count > 0
+            else raw_child_value
         )
         normalized_child_value = (
             float(
@@ -711,6 +739,7 @@ def run_simulation(
     descendant_exploration: float | None = (
         SEARCH_DESCENDANT_PUCT_EXPLORATION
     ),
+    child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
 ) -> float:
     if is_game_over(node.game_state):
         value = get_terminal_value(node.game_state)
@@ -762,6 +791,7 @@ def run_simulation(
                     is_root,
                 )
             ),
+            child_q_pseudo_count=child_q_pseudo_count,
         )
         value = -run_simulation(
             child,
@@ -779,6 +809,7 @@ def run_simulation(
             use_q_value_normalization_at_root_only,
             is_root=False,
             descendant_exploration=descendant_exploration,
+            child_q_pseudo_count=child_q_pseudo_count,
         )
 
     node.visit_count += 1
@@ -814,6 +845,7 @@ def run_simulation_batch(
     descendant_exploration: float | None = (
         SEARCH_DESCENDANT_PUCT_EXPLORATION
     ),
+    child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
 ) -> None:
     reservation_counts: dict[int, int] = {}
     search_paths: list[list[SearchNode]] = []
@@ -843,6 +875,7 @@ def run_simulation_batch(
                     use_q_value_normalization_at_root_only,
                     node is root,
                 ),
+                child_q_pseudo_count,
             )
             search_path.append(node)
 
@@ -953,6 +986,7 @@ def run_search_simulations(
     descendant_exploration: float | None = (
         SEARCH_DESCENDANT_PUCT_EXPLORATION
     ),
+    child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
 ) -> None:
     remaining_simulation_count = simulation_count
 
@@ -972,6 +1006,7 @@ def run_search_simulations(
             q_value_normalization_weight,
             use_q_value_normalization_at_root_only,
             descendant_exploration=descendant_exploration,
+            child_q_pseudo_count=child_q_pseudo_count,
         )
         remaining_simulation_count -= 1
 
@@ -996,6 +1031,7 @@ def run_search_simulations(
             q_value_normalization_weight,
             use_q_value_normalization_at_root_only,
             descendant_exploration,
+            child_q_pseudo_count,
         )
         remaining_simulation_count -= batch_simulation_count
 
@@ -1023,6 +1059,7 @@ def select_search_move(
     use_q_value_normalization_at_root_only: bool = (
         SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY
     ),
+    child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
 ) -> int:
     root = SearchNode(game_state=game_state, prior=1)
     run_search_simulations(
@@ -1044,6 +1081,7 @@ def select_search_move(
         use_q_value_normalization_at_root_only=(
             use_q_value_normalization_at_root_only
         ),
+        child_q_pseudo_count=child_q_pseudo_count,
     )
 
     if not root.children:
@@ -1063,6 +1101,7 @@ class MokaSearchSession:
         descendant_exploration: float | None = (
             SEARCH_DESCENDANT_PUCT_EXPLORATION
         ),
+        child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
         value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
         area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
         rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
@@ -1101,6 +1140,7 @@ class MokaSearchSession:
         self.evaluator = evaluator
         self.exploration = exploration
         self.descendant_exploration = descendant_exploration
+        self.child_q_pseudo_count = child_q_pseudo_count
         self.value_weight = value_weight
         self.area_value_weight = area_value_weight
         self.rollout_depth = rollout_depth
@@ -1247,6 +1287,7 @@ class MokaSearchSession:
             self.q_value_normalization_weight,
             self.use_q_value_normalization_at_root_only,
             self.descendant_exploration,
+            self.child_q_pseudo_count,
         )
         ordered_visit_counts = sorted(
             (
@@ -1283,6 +1324,7 @@ class MokaSearchSession:
                     self.q_value_normalization_weight,
                     self.use_q_value_normalization_at_root_only,
                     self.descendant_exploration,
+                    self.child_q_pseudo_count,
                 )
 
         if not root.children:
@@ -1342,6 +1384,7 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
         descendant_exploration: float | None = (
             SEARCH_DESCENDANT_PUCT_EXPLORATION
         ),
+        child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
         value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
         area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
         rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
@@ -1381,6 +1424,7 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
             evaluator=evaluator,
             exploration=exploration,
             descendant_exploration=descendant_exploration,
+            child_q_pseudo_count=child_q_pseudo_count,
             value_weight=value_weight,
             area_value_weight=area_value_weight,
             rollout_depth=rollout_depth,
@@ -1437,6 +1481,7 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                 self.q_value_normalization_weight,
                 self.use_q_value_normalization_at_root_only,
                 descendant_exploration=self.descendant_exploration,
+                child_q_pseudo_count=self.child_q_pseudo_count,
             )
             root_evaluation_count += 1
 
@@ -1493,6 +1538,7 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                     self.q_value_normalization_weight,
                     self.use_q_value_normalization_at_root_only,
                     resolved_descendant_exploration,
+                    self.child_q_pseudo_count,
                 )
 
             remaining_simulation_count -= (

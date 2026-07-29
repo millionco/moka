@@ -4430,3 +4430,32 @@ Coefficient 1.0 advanced as the unique local leader. Two untouched 100-game pair
 The first-block nine-game gain reversed by ten games in the second block. The candidate lost one game in aggregate despite ending games sooner. Descendant exploration 1.0 is rejected.
 
 Exploration 2.0 remains accepted at root and descendants. The independent research control remains available for reproducibility. The checkpoint, browser artifact, search defaults, and Million website remain unchanged.
+
+## 2026-07-28 — Low-visit child-Q shrinkage
+
+### Hypothesis
+
+At a 64-evaluation budget, one leaf evaluation immediately becomes a visited child's full Q estimate. A small Bayesian pseudo-count can shrink low-visit child Q toward the parent mean, reducing sensitivity to a noisy first evaluation while decaying as real visits accumulate.
+
+The method changes only PUCT scoring. It uses Moka's existing parent value, child value, and visit count. It adds no evaluation, model tensor, rule heuristic, outcome signal, or teacher access. A zero pseudo-count is exactly disabled. The implementation propagates through ordinary search, batched search, adaptive extensions, and sequential halving. Regression tests cover shrinkage math, invalid negative counts, and the disabled default. Default and explicit zero reproduced identical moves, outcomes, and passes.
+
+### Screen
+
+On 20 fresh games from opening offset 4,060,000:
+
+| Q pseudo-count | Wins | Black | White | Caps | Runtime |
+| -------------: | ---: | ----: | ----: | ---: | ------: |
+|           0.00 |   11 |     6 |     5 |    0 |   52.1s |
+|           0.25 |   11 |     6 |     5 |    0 |   54.9s |
+|           0.50 |   12 |     6 |     6 |    0 |   56.6s |
+|           1.00 |   11 |     6 |     5 |    0 |   56.2s |
+|           2.00 |   10 |     6 |     4 |    0 |   56.5s |
+|           4.00 |   11 |     6 |     5 |    0 |   56.2s |
+
+Pseudo-count 0.5 advanced as the unique screen leader.
+
+### Confirmation
+
+On 100 untouched paired games from opening offset 4,070,000, the unshrunk control won 46 games, split 25 Black and 21 White, with zero caps in 284.5 seconds. Pseudo-count 0.5 won 43, split 26 Black and 17 White, with zero caps in 285.6 seconds.
+
+The candidate lost three games and regressed primarily as White. It is rejected without a second confirmation block. Child-Q pseudo-count zero remains accepted. The independent research control remains available for reproducibility. The checkpoint, browser artifact, search defaults, and Million website remain unchanged.

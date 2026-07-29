@@ -15,6 +15,7 @@ from go_model.search import (
     MokaSearchSession,
     MokaEvaluator,
     SearchNode,
+    blend_child_q_value,
     expand_node_with_evaluation,
     prune_root_children,
     resolve_first_play_urgency_reduction,
@@ -85,6 +86,7 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(arguments.simulations, 64)
         self.assertEqual(arguments.search_exploration, 2.0)
         self.assertIsNone(arguments.descendant_search_exploration)
+        self.assertEqual(arguments.search_child_q_pseudo_count, 0.0)
         self.assertEqual(arguments.search_fpu_reduction, 0.5)
         self.assertEqual(arguments.resignation_area_margin, 60.0)
         self.assertTrue(arguments.symmetry_ensemble)
@@ -109,6 +111,8 @@ class SearchTest(unittest.TestCase):
                 "0.75",
                 "--descendant-search-exploration",
                 "1.5",
+                "--search-child-q-pseudo-count",
+                "1",
             ],
         )
         self.assertFalse(control_arguments.symmetry_ensemble)
@@ -116,6 +120,7 @@ class SearchTest(unittest.TestCase):
             control_arguments.descendant_search_exploration,
             1.5,
         )
+        self.assertEqual(control_arguments.search_child_q_pseudo_count, 1)
         self.assertEqual(
             control_arguments.descendant_policy_temperature,
             0.75,
@@ -149,6 +154,43 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(resolve_search_exploration(2, None, False), 2)
         self.assertEqual(resolve_search_exploration(2, 1.5, True), 2)
         self.assertEqual(resolve_search_exploration(2, 1.5, False), 1.5)
+
+    def test_child_q_pseudo_count_shrinks_toward_parent_value(self) -> None:
+        self.assertEqual(blend_child_q_value(-1, 0, 1, 1), -0.5)
+        self.assertEqual(blend_child_q_value(-1, 0, 3, 1), -0.75)
+        self.assertEqual(blend_child_q_value(-1, 0, 1, 0), -1)
+
+        with self.assertRaises(ValueError):
+            blend_child_q_value(-1, 0, 1, -1)
+
+    def test_child_q_pseudo_count_changes_puct_selection(self) -> None:
+        parent = SearchNode(GameState(), 1, visit_count=2)
+        higher_value_child = SearchNode(
+            GameState(),
+            0.01,
+            visit_count=1,
+            value_sum=-1,
+        )
+        higher_prior_child = SearchNode(
+            GameState(),
+            0.99,
+            visit_count=1,
+            value_sum=0,
+        )
+        parent.children = {
+            0: higher_value_child,
+            1: higher_prior_child,
+        }
+
+        raw_selection = select_child(parent, exploration=0.1)
+        shrunk_selection = select_child(
+            parent,
+            exploration=0.1,
+            child_q_pseudo_count=20,
+        )
+
+        self.assertIs(raw_selection, higher_value_child)
+        self.assertIs(shrunk_selection, higher_prior_child)
 
     def test_resignation_requires_hopeless_selected_pass(
         self,
