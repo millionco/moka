@@ -42,6 +42,10 @@ class UniformEvaluator:
         return [self.evaluate(game_state) for game_state in game_states]
 
 
+class FreeUniformEvaluator(UniformEvaluator):
+    evaluation_count = 0
+
+
 class BiasedPolicyModel:
     def __call__(self, features: mx.array) -> tuple[mx.array, mx.array]:
         policy_logits = np.zeros(
@@ -87,7 +91,12 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(arguments.search_exploration, 2.0)
         self.assertIsNone(arguments.descendant_search_exploration)
         self.assertEqual(arguments.search_child_q_pseudo_count, 0.0)
+        self.assertEqual(
+            arguments.search_evaluation_budget_extra_simulations,
+            0,
+        )
         self.assertEqual(arguments.search_fpu_reduction, 0.5)
+        self.assertEqual(arguments.opponent_branches, 4)
         self.assertEqual(arguments.resignation_area_margin, 60.0)
         self.assertTrue(arguments.symmetry_ensemble)
         self.assertEqual(arguments.descendant_policy_temperature, 1.0)
@@ -96,6 +105,7 @@ class SearchTest(unittest.TestCase):
             0.125,
         )
         self.assertTrue(arguments.root_symmetry_ensemble)
+        self.assertFalse(arguments.shared_root_evaluator)
         self.assertEqual(
             arguments.root_symmetry_geometric_policy_weight,
             0.125,
@@ -149,6 +159,39 @@ class SearchTest(unittest.TestCase):
 
         self.assertGreater(sharpened_policy[0], default_policy[0])
         self.assertAlmostEqual(float(np.sum(sharpened_policy)), 1, places=6)
+
+    def test_evaluator_cache_can_be_isolated_between_games(self) -> None:
+        evaluator = MokaEvaluator(
+            BiasedPolicyModel(),
+            use_symmetry_ensemble=False,
+        )
+        game_state = GameState()
+
+        evaluator.evaluate(game_state)
+        evaluator.evaluate(game_state)
+        self.assertEqual(evaluator.evaluation_count, 1)
+
+        evaluator.clear_cache()
+        evaluator.evaluate(game_state)
+        self.assertEqual(evaluator.evaluation_count, 2)
+
+    def test_saved_root_evaluation_buys_one_replacement_simulation(self) -> None:
+        evaluator = MokaEvaluator(
+            BiasedPolicyModel(),
+            use_symmetry_ensemble=False,
+        )
+        game_state = GameState()
+        evaluator.evaluate(game_state)
+        search_session = MokaSearchSession(
+            evaluator,
+            root_evaluator=evaluator,
+            use_saved_root_evaluation_budget=True,
+        )
+        root = search_session.align_root(game_state)
+
+        search_session.select_move_with_search_targets(game_state, 3)
+
+        self.assertEqual(root.visit_count, 4)
 
     def test_descendant_exploration_inherits_or_overrides_root(self) -> None:
         self.assertEqual(resolve_search_exploration(2, None, False), 2)
@@ -293,6 +336,28 @@ class SearchTest(unittest.TestCase):
 
         self.assertEqual(root.visit_count, 17)
         self.assertTrue(root.children)
+
+    def test_evaluation_budget_adds_only_bounded_free_simulations(self) -> None:
+        evaluator = FreeUniformEvaluator()
+        root = SearchNode(GameState(), 1)
+
+        run_search_simulations(
+            root,
+            evaluator,
+            17,
+            maximum_extra_simulation_count=3,
+        )
+
+        self.assertEqual(root.visit_count, 20)
+
+    def test_evaluation_budget_rejects_negative_extra_simulations(self) -> None:
+        with self.assertRaises(ValueError):
+            run_search_simulations(
+                SearchNode(GameState(), 1),
+                FreeUniformEvaluator(),
+                17,
+                maximum_extra_simulation_count=-1,
+            )
 
     def test_search_session_reuses_opponent_reply_subtree(self) -> None:
         evaluator = UniformEvaluator()

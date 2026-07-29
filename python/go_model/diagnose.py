@@ -14,9 +14,12 @@ from go_model.config import (
     MID_GAME_MOVE_COUNT,
     MINIMUM_TEACHER_PASS_MOVE_COUNT,
     OPENING_MOVE_COUNT,
+    SEARCH_ROOT_POLICY_TEMPERATURE,
+    SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
 from go_model.model import MokaNestedNetwork
+from go_model.search import MokaEvaluator, MokaSearchSession
 from go_model.teacher import KataGoTeacher
 
 
@@ -50,16 +53,32 @@ def diagnose_arena(
     teacher_path: Path,
     game_count: int,
     opening_offset: int,
+    simulation_count: int,
 ) -> dict:
     model = MokaNestedNetwork()
     model.load_weights(str(checkpoint_path))
     model.eval()
     teacher = KataGoTeacher(teacher_path)
+    evaluator = MokaEvaluator(model)
+    root_evaluator = MokaEvaluator(
+        model,
+        use_symmetry_ensemble=True,
+        policy_temperature=SEARCH_ROOT_POLICY_TEMPERATURE,
+        symmetry_geometric_policy_weight=(
+            SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
+        ),
+    )
     games: list[dict] = []
 
     for game_index in range(game_count):
+        evaluator.clear_cache()
+        root_evaluator.clear_cache()
         game_state = create_opening_game_state(game_index, opening_offset)
         is_moka_black = game_index % ARENA_OPENING_PAIR_SIZE == 0
+        search_session = MokaSearchSession(
+            evaluator,
+            root_evaluator=root_evaluator,
+        )
         decisions: list[dict] = []
 
         while not is_game_over(game_state):
@@ -73,12 +92,6 @@ def diagnose_arena(
                 game_state = next_state
                 continue
 
-            features = encode_moka_features(game_state)
-            policy_logits, moka_value = model(
-                mx.array(features[None], dtype=mx.float32)
-            )
-            mx.eval(policy_logits, moka_value)
-            logits = np.asarray(policy_logits)[0]
             teacher_policy, teacher_value_before = teacher.evaluate(game_state)
             legal_moves = get_legal_moves(game_state)
             selectable_moves = (
@@ -86,14 +99,37 @@ def diagnose_arena(
                 if game_state.move_count < MINIMUM_TEACHER_PASS_MOVE_COUNT
                 else legal_moves
             )
-            moka_policy = softmax_logits(logits, selectable_moves)
+            if simulation_count > 0:
+                searched_root = search_session.align_root(game_state)
+                move, searched_policy = search_session.select_move_with_policy(
+                    game_state,
+                    simulation_count,
+                )
+                moka_policy = normalize_policy(
+                    searched_policy,
+                    selectable_moves,
+                )
+                moka_value = searched_root.mean_value
+                symmetry_value_spread = (
+                    root_evaluator.get_symmetry_value_spread(game_state)
+                )
+            else:
+                features = encode_moka_features(game_state)
+                policy_logits, model_value = model(
+                    mx.array(features[None], dtype=mx.float32)
+                )
+                mx.eval(policy_logits, model_value)
+                logits = np.asarray(policy_logits)[0]
+                moka_policy = softmax_logits(logits, selectable_moves)
+                move = selectable_moves[int(np.argmax(moka_policy))]
+                moka_value = float(np.asarray(model_value)[0])
+                symmetry_value_spread = 0
             normalized_teacher_policy = normalize_policy(
                 teacher_policy,
                 selectable_moves,
             )
-            selected_index = int(np.argmax(moka_policy))
+            selected_index = selectable_moves.index(move)
             teacher_index = int(np.argmax(normalized_teacher_policy))
-            move = selectable_moves[selected_index]
             teacher_move = selectable_moves[teacher_index]
             next_state = play_move(game_state, move)
 
@@ -102,6 +138,20 @@ def diagnose_arena(
 
             _, child_teacher_value = teacher.evaluate(next_state)
             parent_value_after = -child_teacher_value
+            teacher_next_state = (
+                next_state
+                if move == teacher_move
+                else play_move(game_state, teacher_move)
+            )
+
+            if teacher_next_state is None:
+                raise RuntimeError("Teacher selected an illegal move.")
+
+            teacher_move_value_after = (
+                parent_value_after
+                if move == teacher_move
+                else -teacher.evaluate(teacher_next_state)[1]
+            )
             positive_teacher_mask = normalized_teacher_policy > 0
             policy_kl = float(
                 np.sum(
@@ -128,11 +178,18 @@ def diagnose_arena(
                     "teacher_probability": float(
                         normalized_teacher_policy[selected_index]
                     ),
-                    "moka_value": float(np.asarray(moka_value)[0]),
+                    "moka_value": float(moka_value),
+                    "symmetry_value_spread": symmetry_value_spread,
                     "teacher_value_before": float(teacher_value_before),
                     "teacher_value_after": float(parent_value_after),
-                    "teacher_value_loss": float(
+                    "teacher_parent_value_change": float(
                         teacher_value_before - parent_value_after
+                    ),
+                    "teacher_move_value_after": float(
+                        teacher_move_value_after
+                    ),
+                    "teacher_move_value_regret": float(
+                        teacher_move_value_after - parent_value_after
                     ),
                 }
             )
@@ -170,18 +227,18 @@ def diagnose_arena(
             "mean_policy_kl": float(
                 np.mean([decision["policy_kl"] for decision in decisions])
             ),
-            "mean_teacher_value_loss": float(
+            "mean_teacher_move_value_regret": float(
                 np.mean(
                     [
-                        decision["teacher_value_loss"]
+                        decision["teacher_move_value_regret"]
                         for decision in decisions
                     ]
                 )
             ),
-            "maximum_teacher_value_loss": float(
+            "maximum_teacher_move_value_regret": float(
                 np.max(
                     [
-                        decision["teacher_value_loss"]
+                        decision["teacher_move_value_regret"]
                         for decision in decisions
                     ]
                 )
@@ -192,6 +249,7 @@ def diagnose_arena(
         "checkpoint": str(checkpoint_path),
         "game_count": game_count,
         "opening_offset": opening_offset,
+        "simulation_count": simulation_count,
         "moka_wins": sum(game["did_moka_win"] for game in games),
         "phase_summaries": phase_summaries,
         "games": games,
@@ -212,6 +270,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=ARENA_DEFAULT_GAME_COUNT,
     )
     argument_parser.add_argument("--opening-offset", type=int, default=0)
+    argument_parser.add_argument("--simulations", type=int, default=0)
     argument_parser.add_argument("--output", required=True, type=Path)
     return argument_parser
 
@@ -223,6 +282,7 @@ def main() -> None:
         arguments.teacher,
         arguments.games,
         arguments.opening_offset,
+        arguments.simulations,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(json.dumps(diagnostics, indent="\t"))

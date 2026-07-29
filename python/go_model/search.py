@@ -32,6 +32,7 @@ from go_model.config import (
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
     SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY,
     SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
+    SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_POLICY_EPSILON,
     SEARCH_PUCT_EXPLORATION,
@@ -132,10 +133,42 @@ class MokaEvaluator:
         self.symmetry_top_move_vote_policy_weight = (
             symmetry_top_move_vote_policy_weight
         )
+        self.evaluation_count = 0
         self.cache: dict[
             tuple[bytes, int, int, tuple[int, ...]],
             tuple[np.ndarray, float],
         ] = {}
+        self.symmetry_value_spreads: dict[
+            tuple[bytes, int, int, tuple[int, ...]],
+            float,
+        ] = {}
+
+    def clear_cache(self) -> None:
+        self.cache.clear()
+        self.symmetry_value_spreads.clear()
+
+    def get_output_configuration(self) -> tuple[object, ...]:
+        return (
+            self.use_symmetry_ensemble,
+            self.symmetry_rotation_count,
+            self.should_flip_symmetry,
+            self.use_symmetry_pair,
+            self.policy_temperature,
+            self.symmetry_geometric_policy_weight,
+            self.symmetry_trimmed_policy_weight,
+            self.symmetry_trimmed_value_weight,
+            self.symmetry_rank_policy_weight,
+            self.symmetry_rank_move_count,
+            self.symmetry_rank_policy_end_move_count,
+            self.symmetry_rank_minimum_top_move_vote_count,
+            self.symmetry_top_move_vote_policy_weight,
+        )
+
+    def get_symmetry_value_spread(self, game_state: GameState) -> float:
+        return self.symmetry_value_spreads.get(
+            self.get_cache_key(game_state),
+            0,
+        )
 
     def get_cache_key(
         self,
@@ -166,6 +199,7 @@ class MokaEvaluator:
                 missing_game_states.append(game_state)
 
         if missing_game_states:
+            self.evaluation_count += len(missing_game_states)
             base_features = [
                 encode_moka_features(game_state)
                 for game_state in missing_game_states
@@ -272,25 +306,33 @@ class MokaEvaluator:
                             self.symmetry_rank_minimum_top_move_vote_count,
                             self.symmetry_top_move_vote_policy_weight,
                         )
-                    self.cache[self.get_cache_key(game_state)] = (
+                    symmetry_value_slice = value_array[
+                        symmetry_start:symmetry_end
+                    ]
+                    value_spread = float(np.std(symmetry_value_slice))
+                    cache_key = self.get_cache_key(game_state)
+                    self.cache[cache_key] = (
                         apply_search_policy_temperature(
                             aggregated_policy,
                             self.policy_temperature,
                         ),
                         aggregate_symmetry_values(
-                            value_array[symmetry_start:symmetry_end],
+                            symmetry_value_slice,
                             self.symmetry_trimmed_value_weight,
                         ),
                     )
+                    self.symmetry_value_spreads[cache_key] = value_spread
             else:
                 for missing_index, game_state in enumerate(missing_game_states):
-                    self.cache[self.get_cache_key(game_state)] = (
+                    cache_key = self.get_cache_key(game_state)
+                    self.cache[cache_key] = (
                         apply_search_policy_temperature(
                             policies[missing_index],
                             self.policy_temperature,
                         ),
                         float(value_array[missing_index]),
                     )
+                    self.symmetry_value_spreads[cache_key] = 0
 
         return [
             self.cache[self.get_cache_key(game_state)] for game_state in game_states
@@ -987,7 +1029,17 @@ def run_search_simulations(
         SEARCH_DESCENDANT_PUCT_EXPLORATION
     ),
     child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
+    maximum_extra_simulation_count: int = (
+        SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT
+    ),
 ) -> None:
+    if maximum_extra_simulation_count < 0:
+        raise ValueError("Maximum extra simulation count must be nonnegative.")
+    starting_evaluation_count = (
+        evaluator.evaluation_count
+        if maximum_extra_simulation_count > 0
+        else 0
+    )
     remaining_simulation_count = simulation_count
 
     if remaining_simulation_count > 0 and root.visit_count == 0:
@@ -1034,6 +1086,33 @@ def run_search_simulations(
             child_q_pseudo_count,
         )
         remaining_simulation_count -= batch_simulation_count
+
+    extra_simulation_count = 0
+
+    while (
+        extra_simulation_count < maximum_extra_simulation_count
+        and evaluator.evaluation_count - starting_evaluation_count
+        < simulation_count
+    ):
+        run_simulation_batch(
+            root,
+            evaluator,
+            1,
+            exploration,
+            value_weight,
+            area_value_weight,
+            rollout_depth,
+            root_player_color,
+            opponent_branch_count,
+            first_play_urgency_reduction,
+            use_first_play_urgency_prior_mass,
+            use_first_play_urgency_at_root_only,
+            q_value_normalization_weight,
+            use_q_value_normalization_at_root_only,
+            descendant_exploration,
+            child_q_pseudo_count,
+        )
+        extra_simulation_count += 1
 
 
 def select_search_move(
@@ -1102,6 +1181,10 @@ class MokaSearchSession:
             SEARCH_DESCENDANT_PUCT_EXPLORATION
         ),
         child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
+        maximum_extra_simulation_count: int = (
+            SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT
+        ),
+        use_saved_root_evaluation_budget: bool = False,
         value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
         area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
         rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
@@ -1141,6 +1224,10 @@ class MokaSearchSession:
         self.exploration = exploration
         self.descendant_exploration = descendant_exploration
         self.child_q_pseudo_count = child_q_pseudo_count
+        self.maximum_extra_simulation_count = maximum_extra_simulation_count
+        self.use_saved_root_evaluation_budget = (
+            use_saved_root_evaluation_budget
+        )
         self.value_weight = value_weight
         self.area_value_weight = area_value_weight
         self.rollout_depth = rollout_depth
@@ -1267,14 +1354,27 @@ class MokaSearchSession:
         simulation_count: int,
     ) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
         root = self.align_root(game_state)
+        starting_root_evaluation_count = (
+            self.root_evaluator.evaluation_count
+            if self.use_saved_root_evaluation_budget
+            and self.root_evaluator is not None
+            else 0
+        )
         root_evaluation_count = self.refresh_root_evaluation(
             root,
             game_state,
         )
+        did_reuse_root_evaluation = (
+            self.use_saved_root_evaluation_budget
+            and self.root_evaluator is not None
+            and self.root_evaluator.evaluation_count
+            == starting_root_evaluation_count
+        )
         run_search_simulations(
             root,
             self.evaluator,
-            max(simulation_count - root_evaluation_count, 0),
+            max(simulation_count - root_evaluation_count, 0)
+            + int(did_reuse_root_evaluation),
             self.exploration,
             self.value_weight,
             self.area_value_weight,
@@ -1288,6 +1388,7 @@ class MokaSearchSession:
             self.use_q_value_normalization_at_root_only,
             self.descendant_exploration,
             self.child_q_pseudo_count,
+            self.maximum_extra_simulation_count,
         )
         ordered_visit_counts = sorted(
             (
@@ -1325,6 +1426,7 @@ class MokaSearchSession:
                     self.use_q_value_normalization_at_root_only,
                     self.descendant_exploration,
                     self.child_q_pseudo_count,
+                    self.maximum_extra_simulation_count,
                 )
 
         if not root.children:
@@ -1385,6 +1487,10 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
             SEARCH_DESCENDANT_PUCT_EXPLORATION
         ),
         child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
+        maximum_extra_simulation_count: int = (
+            SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT
+        ),
+        use_saved_root_evaluation_budget: bool = False,
         value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
         area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
         rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
@@ -1425,6 +1531,10 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
             exploration=exploration,
             descendant_exploration=descendant_exploration,
             child_q_pseudo_count=child_q_pseudo_count,
+            maximum_extra_simulation_count=maximum_extra_simulation_count,
+            use_saved_root_evaluation_budget=(
+                use_saved_root_evaluation_budget
+            ),
             value_weight=value_weight,
             area_value_weight=area_value_weight,
             rollout_depth=rollout_depth,
@@ -1539,6 +1649,7 @@ class MokaSequentialHalvingSearchSession(MokaSearchSession):
                     self.use_q_value_normalization_at_root_only,
                     resolved_descendant_exploration,
                     self.child_q_pseudo_count,
+                    self.maximum_extra_simulation_count,
                 )
 
             remaining_simulation_count -= (

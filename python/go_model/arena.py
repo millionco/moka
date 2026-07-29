@@ -38,6 +38,7 @@ from go_model.config import (
     SEARCH_LATE_SIMULATION_START_MOVE_COUNT,
     SEARCH_LATE_VALUE_START_MOVE_COUNT,
     SEARCH_LATE_VALUE_WEIGHT,
+    SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_PUCT_EXPLORATION,
     SEARCH_PUCT_VALUE_WEIGHT,
@@ -324,6 +325,10 @@ def run_arena(
     late_search_value_start_move_count: int = (
         SEARCH_LATE_VALUE_START_MOVE_COUNT
     ),
+    maximum_extra_simulation_count: int = (
+        SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT
+    ),
+    use_shared_root_evaluator: bool = False,
 ) -> tuple[int, int, int]:
     model = create_moka_network(
         use_nested_network,
@@ -379,6 +384,18 @@ def run_arena(
         if use_root_symmetry_ensemble
         else None
     )
+
+    if use_shared_root_evaluator:
+        if (
+            root_evaluator is None
+            or evaluator.get_output_configuration()
+            != root_evaluator.get_output_configuration()
+        ):
+            raise ValueError(
+                "Root and descendant evaluator configurations must match."
+            )
+        root_evaluator = evaluator
+
     moka_win_count = 0
     moka_black_win_count = 0
     moka_white_win_count = 0
@@ -393,6 +410,11 @@ def run_arena(
     start_time = time.perf_counter()
 
     for game_index in range(game_count):
+        evaluator.clear_cache()
+
+        if root_evaluator is not None:
+            root_evaluator.clear_cache()
+
         game_state = create_opening_game_state(game_index, opening_offset)
         is_moka_black = game_index % ARENA_OPENING_PAIR_SIZE == 0
         search_session = (
@@ -403,6 +425,12 @@ def run_arena(
                     exploration=search_exploration,
                     descendant_exploration=descendant_search_exploration,
                     child_q_pseudo_count=child_q_pseudo_count,
+                    maximum_extra_simulation_count=(
+                        maximum_extra_simulation_count
+                    ),
+                    use_saved_root_evaluation_budget=(
+                        use_shared_root_evaluator
+                    ),
                     value_weight=search_value_weight,
                     area_value_weight=search_area_value_weight,
                     rollout_depth=search_rollout_depth,
@@ -448,6 +476,12 @@ def run_arena(
                     exploration=search_exploration,
                     descendant_exploration=descendant_search_exploration,
                     child_q_pseudo_count=child_q_pseudo_count,
+                    maximum_extra_simulation_count=(
+                        maximum_extra_simulation_count
+                    ),
+                    use_saved_root_evaluation_budget=(
+                        use_shared_root_evaluator
+                    ),
                     value_weight=search_value_weight,
                     area_value_weight=search_area_value_weight,
                     rollout_depth=search_rollout_depth,
@@ -662,6 +696,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_CHILD_Q_PSEUDO_COUNT,
     )
     argument_parser.add_argument(
+        "--search-evaluation-budget-extra-simulations",
+        type=int,
+        default=SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT,
+    )
+    argument_parser.add_argument(
         "--search-value-weight",
         type=float,
         default=SEARCH_PUCT_VALUE_WEIGHT,
@@ -749,6 +788,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--root-symmetry-ensemble",
         action=argparse.BooleanOptionalAction,
         default=SEARCH_ROOT_SYMMETRY_ENSEMBLE,
+    )
+    argument_parser.add_argument(
+        "--shared-root-evaluator",
+        action="store_true",
     )
     argument_parser.add_argument(
         "--root-symmetry-geometric-policy-weight",
@@ -905,6 +948,8 @@ def main() -> None:
         arguments.resignation_area_margin,
         arguments.late_search_value_weight,
         arguments.late_search_value_start_move,
+        arguments.search_evaluation_budget_extra_simulations,
+        arguments.shared_root_evaluator,
     )
 
 

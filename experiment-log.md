@@ -4551,3 +4551,94 @@ Seeds 280–282 started from the accepted float shadow and used one epoch, learn
 One bounded step-size check used seed 283 at learning rate 0.000001. It still regressed sibling-ensemble loss to 2.2778, seed-260 consensus loss to 2.2765, b18 3,300,000 loss to 3.0053, and b18 3,500,000 loss to 2.9593. Its value error also regressed on every corpus.
 
 The smaller update did not rescue the objective, identifying the ensemble target rather than excessive step size as the problem. No candidate entered the arena. Multi-checkpoint target generation remains available for future independent teacher ensembles, but sibling prediction ensembling is rejected. The accepted checkpoint, browser artifact, search defaults, and Million website remain unchanged.
+
+## 2026-07-28 — Evaluation-cache accounting
+
+### Audit
+
+The accepted descendant evaluator already caches exact feature states, but search counts tree simulations rather than model cache misses. On 20 games from opening offset 4,120,000, the descendant evaluator received 39,844 requests: 1,855 hits and 37,989 misses, a 4.66% hit rate. The separate real-root evaluator received 685 requests and zero hits.
+
+The arena had retained both evaluator caches across separate games. That is valid memoization but does not reproduce a standalone browser game, which begins without positions from earlier matches. Clearing both caches at each game boundary reduced the descendant hit rate to 3.38% on 20 fresh games from opening offset 4,130,000: 1,179 hits among 34,873 requests. Root hits remained zero. Per-game cache isolation is retained for faithful research timing and prevents paired games from lending inference work to one another.
+
+### Fixed evaluation budget
+
+A disabled research control tracked actual descendant cache misses. After the ordinary 64 simulations, it could add a bounded number of simulations only while the move remained below its original miss budget. Cached and terminal leaves could therefore contribute extra tree visits without another model evaluation.
+
+On 20 fresh games from opening offset 4,140,000:
+
+| Maximum free simulations | Wins | Black | White | Caps | Runtime |
+| -----------------------: | ---: | ----: | ----: | ---: | ------: |
+|                        0 |    9 |     4 |     5 |    0 |   84.2s |
+|                        4 |    8 |     4 |     4 |    0 |   83.4s |
+|                        8 |    8 |     4 |     4 |    0 |   87.2s |
+
+Both candidates lost one completed game and were rejected.
+
+### Shared root evaluator
+
+Accepted root and descendant evaluation currently use the same eight symmetries, policy temperature, geometric policy aggregation, value aggregation, and checkpoint. A second disabled control shared their cache only when every output-affecting setting matched. When the real root had already been evaluated as a descendant, the saved root call funded exactly one replacement simulation.
+
+On 20 fresh games from opening offset 4,150,000, control and shared-root search both won 10 games, split five Black and five White, with zero caps. Runtime changed from 76.5 to 81.3 seconds. Exact root reuse tied rather than improved play and is rejected.
+
+Both controls remain disabled for reproducibility. Cache isolation remains enabled in the arena. The accepted model and browser artifact remain unchanged.
+
+## 2026-07-28 — Search-aware causal regret diagnostics
+
+The diagnostic arena now supports the accepted 64-simulation search rather than only raw policy play. It records the search policy, searched root value, teacher-policy agreement, and symmetry value spread at every Moka decision.
+
+The previous diagnostic defined move loss as KataGo's parent value minus its value after Moka's move. That metric could report large loss even when Moka selected KataGo's own top-policy move because the teacher value head is not exactly consistent across parent and child evaluations. The corrected metric evaluates both children and measures KataGo's value after its top-policy move minus its value after Moka's actual move. Teacher-matching moves therefore have exactly zero action regret.
+
+Ten games from opening offset 4,160,000 produced 417 Moka decisions and four wins:
+
+| Phase   | Decisions | Teacher move agreement | Mean causal regret | Maximum causal regret | Regret at least 0.2 |
+| :------ | --------: | ---------------------: | -----------------: | --------------------: | ------------------: |
+| Opening |        80 |                  58.8% |             0.0179 |                0.2979 |                   2 |
+| Middle  |       150 |                  62.7% |             0.0179 |                0.7106 |                  13 |
+| Endgame |       187 |                  58.3% |             0.0078 |                0.9210 |                   3 |
+
+Only 18 of 417 decisions had regret of at least 0.2. Symmetry value spread did not identify them:
+
+| Metric                             |  Result |
+| :--------------------------------- | ------: |
+| Mean spread, critical decisions    |  0.1150 |
+| Mean spread, other decisions       |  0.1162 |
+| Spread–regret correlation          | -0.0006 |
+| Critical ROC AUC                   |   0.508 |
+| Highest-spread 20% critical recall |   5.56% |
+
+Value-spread uncertainty is therefore rejected before runtime intervention. The corrected causal diagnostic and raw spread measurement remain available for future objectives.
+
+## 2026-07-28 — Full-symmetry opponent reply width
+
+### Hypothesis
+
+Opponent reply pruning previously improved high-visit search, but its low-budget calibration predated full descendant symmetry and FPU reduction 0.5. Restricting only opponent-to-move nodes to Moka's highest-prior replies can concentrate the fixed 64 simulations while leaving every Moka-to-move branch legal. It uses no teacher query, benchmark label, rule heuristic, extra model, or additional inference.
+
+### Screen
+
+The exact accepted artifact, 64 simulations, full root and descendant symmetry, geometric policy weight 0.125, exploration 2.0, value weight 1.25, FPU reduction 0.5, maximum-visit selection, and margin-60 resignation remained fixed. On 20 fresh paired games from opening offset 4,170,000:
+
+| Opponent branch width | Wins | Black | White | Caps | Runtime |
+| --------------------: | ---: | ----: | ----: | ---: | ------: |
+|                  Full |    7 |     5 |     2 |    0 |   92.5s |
+|                     4 |   10 |     7 |     3 |    0 |   90.7s |
+|                     8 |    7 |     4 |     3 |    0 |   92.7s |
+|                    16 |    8 |     6 |     2 |    0 |   97.2s |
+
+Width 4 advanced as the unique screen leader.
+
+### Confirmation
+
+Two untouched paired 100-game blocks compared the frozen width with full branching:
+
+| Opening offset | Full wins | Width-4 wins | Full Black / White | Width-4 Black / White | Full / width-4 caps | Full / width-4 runtime |
+| -------------: | --------: | -----------: | :----------------- | :-------------------- | ------------------: | ---------------------: |
+|      4,180,000 |        41 |           42 | 19 / 22            | 19 / 23               |               0 / 0 |        399.1s / 431.0s |
+|      4,190,000 |        46 |           50 | 21 / 25            | 23 / 27               |               0 / 0 |        407.6s / 428.4s |
+|      **Total** |    **87** |       **92** | **40 / 47**        | **42 / 50**           |           **0 / 0** |    **806.7s / 859.4s** |
+
+Width 4 improved both independent blocks, adding two Black wins and three White wins in aggregate without a cap. Total runtime increased 6.5% because its games ran longer despite the narrower opponent tree.
+
+Opponent branch width 4 is accepted as the research default. The 104,129-parameter checkpoint, 111,920-byte browser artifact, and their digests remain unchanged. The Million website remains untouched.
+
+The promoted default and explicit `--opponent-branches 4` reproduced the same two-game result at opening offset 4,200,000: one Moka win as White, one KataGo win, four Moka passes, two KataGo passes, and zero caps.
