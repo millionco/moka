@@ -4302,3 +4302,47 @@ Two untouched 100-game blocks produced:
 The first-block three-game gain reversed by two games in the second block. A one-game aggregate edge with opposite block outcomes and 4.1% more runtime is insufficient evidence of stronger play. Adaptive 64-to-80 search at a 15% margin is rejected.
 
 Fixed 64 visits remain accepted. The model, artifact, search defaults, and Million website remain unchanged.
+
+## 2026-07-28 — Descendant symmetry aggregation
+
+### Robust value aggregation
+
+Root-only trimmed symmetry values were previously behaviorally inert because a real root's aggregate value has limited influence after expansion. Full descendant symmetry makes the same aggregation actionable: every descendant value enters a search backup.
+
+A research control blended the arithmetic mean of the eight aligned values with a mean that discarded the highest and lowest view. On 20 fresh games from opening offset 3,890,000:
+
+| Trimmed-value weight | Wins | Black | White | Caps | Runtime |
+| -------------------: | ---: | ----: | ----: | ---: | ------: |
+|                 0.00 |   10 |     4 |     6 |    0 |   53.3s |
+|                 0.25 |    9 |     4 |     5 |    0 |   55.9s |
+|                 0.50 |    9 |     4 |     5 |    0 |   54.8s |
+|                 0.75 |    9 |     4 |     5 |    0 |   54.7s |
+|                 1.00 |    9 |     4 |     5 |    0 |   56.6s |
+
+Arithmetic averaging beat every nonzero blend. No candidate advanced, and the rejected runtime option was removed.
+
+### Geometric policy coefficient
+
+The accepted full descendant ensemble initially inherited the root's 0.125 geometric policy blend. That coefficient was selected for real roots before full descendant symmetry existed. Root and descendant coefficients were separated so they could be calibrated independently without changing default behavior. Search-data generators now pass the root coefficient explicitly.
+
+On 20 fresh games from opening offset 3,910,000:
+
+| Descendant geometric weight | Wins | Black | White | Caps | Runtime |
+| --------------------------: | ---: | ----: | ----: | ---: | ------: |
+|                      0.0000 |   12 |     8 |     4 |    0 |   55.6s |
+|                      0.0625 |   12 |     8 |     4 |    0 |   56.2s |
+|                      0.1250 |   11 |     7 |     4 |    0 |   55.4s |
+|                      0.2500 |   11 |     6 |     5 |    0 |   56.3s |
+|                      0.5000 |    9 |     6 |     3 |    0 |   56.0s |
+
+Arithmetic and 0.0625 tied the lead. A fresh 20-game tie-break at opening offset 3,920,000 produced:
+
+| Descendant geometric weight | Wins | Black | White | Caps | Runtime |
+| --------------------------: | ---: | ----: | ----: | ---: | ------: |
+|                      0.0000 |   10 |     4 |     6 |    0 |   53.9s |
+|                      0.0625 |    9 |     4 |     5 |    0 |   53.6s |
+|                      0.1250 |    9 |     4 |     5 |    0 |   52.8s |
+
+Pure arithmetic advanced as the unique tie-break winner. On 100 untouched paired games from opening offset 3,930,000, accepted descendant weight 0.125 won 44 games, split 21 Black and 23 White, with zero caps in 284.8 seconds. Arithmetic also won 44, split 20 Black and 24 White, with zero caps in 279.8 seconds.
+
+The candidate failed to confirm the small screen gains and is rejected. Descendant geometric weight 0.125 remains accepted. The independent research control remains available for reproducibility. The checkpoint, browser artifact, search defaults, and Million website remain unchanged.

@@ -27,6 +27,7 @@ from go_model.config import (
     SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
     SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
     SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
+    SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
     SEARCH_FIRST_PLAY_URGENCY_ROOT_ONLY,
     SEARCH_FIRST_PLAY_URGENCY_USE_PRIOR_MASS,
@@ -243,6 +244,9 @@ def run_arena(
         SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT
     ),
     use_symmetry_ensemble: bool = SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
+    descendant_symmetry_geometric_policy_weight: float = (
+        SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
+    ),
     symmetry_rotation_count: int = 0,
     should_flip_symmetry: bool = False,
     adaptive_max_simulation_count: int = (
@@ -331,6 +335,9 @@ def run_arena(
         symmetry_rotation_count,
         should_flip_symmetry,
         use_descendant_symmetry_pair,
+        symmetry_geometric_policy_weight=(
+            descendant_symmetry_geometric_policy_weight
+        ),
     )
     root_evaluator = (
         MokaEvaluator(
@@ -685,6 +692,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
     )
+    argument_parser.add_argument(
+        "--descendant-symmetry-geometric-policy-weight",
+        type=float,
+        default=SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
+    )
     argument_parser.add_argument("--symmetry-rotation", type=int, default=0)
     argument_parser.add_argument("--symmetry-flip", action="store_true")
     argument_parser.add_argument(
@@ -825,6 +837,7 @@ def main() -> None:
         arguments.search_rollout_depth,
         arguments.sequential_halving_candidates,
         arguments.symmetry_ensemble,
+        arguments.descendant_symmetry_geometric_policy_weight,
         arguments.symmetry_rotation,
         arguments.symmetry_flip,
         arguments.adaptive_max_simulations,

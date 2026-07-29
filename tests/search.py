@@ -71,6 +71,10 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(arguments.search_fpu_reduction, 0.5)
         self.assertEqual(arguments.resignation_area_margin, 60.0)
         self.assertTrue(arguments.symmetry_ensemble)
+        self.assertEqual(
+            arguments.descendant_symmetry_geometric_policy_weight,
+            0.125,
+        )
         self.assertTrue(arguments.root_symmetry_ensemble)
         self.assertEqual(
             arguments.root_symmetry_geometric_policy_weight,
@@ -81,9 +85,15 @@ class SearchTest(unittest.TestCase):
                 "--checkpoint",
                 "checkpoint.safetensors",
                 "--no-symmetry-ensemble",
+                "--descendant-symmetry-geometric-policy-weight",
+                "0.5",
             ],
         )
         self.assertFalse(control_arguments.symmetry_ensemble)
+        self.assertEqual(
+            control_arguments.descendant_symmetry_geometric_policy_weight,
+            0.5,
+        )
 
     def test_resignation_requires_hopeless_selected_pass(
         self,

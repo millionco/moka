@@ -20,6 +20,7 @@ from go_model.config import (
     SEARCH_Q_POLICY_BLEND,
     SEARCH_Q_POLICY_TEMPERATURE,
     SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
+    SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
 from go_model.model import create_moka_network
@@ -115,7 +116,13 @@ def collect_search_distillation_dataset(
     child_game_ids: list[int] = []
     child_root_indexes: list[int] = []
     root_evaluator = (
-        MokaEvaluator(model, use_symmetry_ensemble=True)
+        MokaEvaluator(
+            model,
+            use_symmetry_ensemble=True,
+            symmetry_geometric_policy_weight=(
+                SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
+            ),
+        )
         if use_root_symmetry_ensemble
         else None
     )
