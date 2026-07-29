@@ -5291,3 +5291,37 @@ Two untouched 100-game blocks produced:
 |      **Total** |       **81** |    **79** | **41 / 40**           | **43 / 36**        |           **0 / 0** |    **797.6s / 810.4s** |
 
 The first-block two-game gain reversed to a four-game loss. Aggregate performance regressed by two games, primarily as White, and runtime increased 1.6%. Multiplicative global context is rejected. The promoted checkpoint, browser artifact, and Million website remain unchanged.
+
+## 2026-07-29 — Global-adapter consensus soup
+
+### Hypothesis and frozen selection
+
+The promoted additive global adapters remain the only compact architecture change with a large replicated gain. Five exact INT8 descendants were audited against the incumbent. Each changed only the same 12 global-adapter tensors. The exact-preservation and child-Q directions had cosine similarity 0.07, while the child-Q weights 0.05 and 0.20 directions had cosine similarity 0.98. The two child-Q checkpoints were therefore averaged first as one signal.
+
+Three zero-cost soups were predeclared without arena results. Offline arbitration used the untouched 4,720,000 on-policy bucket and the offset-3,500,000 symmetry-consensus bucket. The equal blend of the exact-preservation replay and averaged child-Q checkpoint was the unique lowest mean normalized-loss candidate without a consensus top-move regression. It also improved the independent 256-visit test loss.
+
+| Dataset                      | Control loss / top move | Candidate loss / top move |
+| :--------------------------- | ----------------------: | ------------------------: |
+| On-policy 4,720,000          |          3.0335 / 35.3% |            3.0238 / 39.2% |
+| Symmetry consensus 3,500,000 |          2.2552 / 75.6% |            2.2496 / 75.6% |
+| Independent 256 visits       |          3.0199 / 34.4% |            3.0058 / 34.4% |
+
+The selected checkpoint retained 105,353 parameters and changed no non-adapter tensor.
+
+### Screen and confirmation
+
+On 20 fresh paired games from opening offset 4,980,000, control scored six wins, split 1 Black / 5 White, while the candidate scored eight, split 4 / 4. Both had zero caps. The exact candidate then advanced unchanged to two untouched 100-game blocks:
+
+| Opening offset | Control wins | Candidate wins | Control Black / White | Candidate Black / White | Control / candidate caps | Control / candidate runtime |
+| -------------: | -----------: | -------------: | :-------------------- | :---------------------- | -----------------------: | --------------------------: |
+|      4,990,000 |           47 |             50 | 25 / 22               | 27 / 23                 |                    0 / 0 |             458.9s / 454.0s |
+|      5,000,000 |           34 |             44 | 18 / 16               | 22 / 22                 |                    0 / 0 |             449.9s / 454.2s |
+|      **Total** |       **81** |         **94** | **43 / 38**           | **49 / 45**             |                **0 / 0** |         **908.8s / 908.2s** |
+
+The candidate improves both independent blocks, adds six Black and seven White wins, introduces no cap, and has effectively identical aggregate arena runtime.
+
+### Promotion
+
+The promoted exact checkpoint is `moka-global-soup-exact-q50-int8-roundtrip.safetensors`, with SHA-256 `90db3d02bb1fe3f850c32b6c4b5b864f049220d1e05d128c4efd686dd5b0d954`. The browser binary remains 113,648 bytes and is 100,653 bytes under deterministic gzip. Its SHA-256 is `35c1e51cc9518a21e2f81cded7f69f41d22c80ca05522ed5e4056cb26d9ed053`; the manifest SHA-256 is `00927862de6c29749124b3257b6618156c07b930ba624e010601b90434c1340e`.
+
+The candidate browser runtime returned finite policy and value outputs in the isolated playtest. The checkpoint and browser artifact are promoted. The Million website remains untouched.
