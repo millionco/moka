@@ -1,5 +1,6 @@
 import unittest
 
+import mlx.core as mx
 import numpy as np
 
 from go_model.arena import (
@@ -12,6 +13,7 @@ from go_model.board import GameState, play_move
 from go_model.config import POLICY_MOVE_COUNT
 from go_model.search import (
     MokaSearchSession,
+    MokaEvaluator,
     SearchNode,
     expand_node_with_evaluation,
     prune_root_children,
@@ -36,6 +38,19 @@ class UniformEvaluator:
         game_states: list[GameState],
     ) -> list[tuple[np.ndarray, float]]:
         return [self.evaluate(game_state) for game_state in game_states]
+
+
+class BiasedPolicyModel:
+    def __call__(self, features: mx.array) -> tuple[mx.array, mx.array]:
+        policy_logits = np.zeros(
+            (features.shape[0], POLICY_MOVE_COUNT),
+            dtype=np.float32,
+        )
+        policy_logits[:, 0] = 1
+        return (
+            mx.array(policy_logits),
+            mx.zeros((features.shape[0],), dtype=mx.float32),
+        )
 
 
 class SearchTest(unittest.TestCase):
@@ -71,6 +86,7 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(arguments.search_fpu_reduction, 0.5)
         self.assertEqual(arguments.resignation_area_margin, 60.0)
         self.assertTrue(arguments.symmetry_ensemble)
+        self.assertEqual(arguments.descendant_policy_temperature, 1.0)
         self.assertEqual(
             arguments.descendant_symmetry_geometric_policy_weight,
             0.125,
@@ -87,13 +103,39 @@ class SearchTest(unittest.TestCase):
                 "--no-symmetry-ensemble",
                 "--descendant-symmetry-geometric-policy-weight",
                 "0.5",
+                "--descendant-policy-temperature",
+                "0.75",
             ],
         )
         self.assertFalse(control_arguments.symmetry_ensemble)
         self.assertEqual(
+            control_arguments.descendant_policy_temperature,
+            0.75,
+        )
+        self.assertEqual(
             control_arguments.descendant_symmetry_geometric_policy_weight,
             0.5,
         )
+
+    def test_descendant_policy_temperature_sharpens_evaluator_policy(
+        self,
+    ) -> None:
+        model = BiasedPolicyModel()
+        default_evaluator = MokaEvaluator(
+            model,
+            use_symmetry_ensemble=False,
+        )
+        sharpened_evaluator = MokaEvaluator(
+            model,
+            use_symmetry_ensemble=False,
+            policy_temperature=0.5,
+        )
+
+        default_policy, _ = default_evaluator.evaluate(GameState())
+        sharpened_policy, _ = sharpened_evaluator.evaluate(GameState())
+
+        self.assertGreater(sharpened_policy[0], default_policy[0])
+        self.assertAlmostEqual(float(np.sum(sharpened_policy)), 1, places=6)
 
     def test_resignation_requires_hopeless_selected_pass(
         self,

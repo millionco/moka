@@ -44,6 +44,7 @@ from go_model.config import (
     SEARCH_TEACHER_UNIFORM_SELECTION_FRACTION,
     SEARCH_TEACHER_VALUE_DISAGREEMENT_WEIGHT,
     SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
+    SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
@@ -212,6 +213,7 @@ def generate_rollout_games(
     root_evaluator = MokaEvaluator(
         model,
         use_symmetry_ensemble=True,
+        policy_temperature=SEARCH_ROOT_POLICY_TEMPERATURE,
         symmetry_geometric_policy_weight=(
             SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
         ),

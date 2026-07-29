@@ -20,6 +20,7 @@ from go_model.config import (
     SEARCH_Q_POLICY_BLEND,
     SEARCH_Q_POLICY_TEMPERATURE,
     SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
+    SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
@@ -119,6 +120,7 @@ def collect_search_distillation_dataset(
         MokaEvaluator(
             model,
             use_symmetry_ensemble=True,
+            policy_temperature=SEARCH_ROOT_POLICY_TEMPERATURE,
             symmetry_geometric_policy_weight=(
                 SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
             ),

@@ -26,6 +26,7 @@ from go_model.config import (
     SEARCH_AREA_VALUE_WEIGHT,
     SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
     SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    SEARCH_DESCENDANT_POLICY_TEMPERATURE,
     SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
     SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
@@ -247,6 +248,9 @@ def run_arena(
     descendant_symmetry_geometric_policy_weight: float = (
         SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
     ),
+    descendant_policy_temperature: float = (
+        SEARCH_DESCENDANT_POLICY_TEMPERATURE
+    ),
     symmetry_rotation_count: int = 0,
     should_flip_symmetry: bool = False,
     adaptive_max_simulation_count: int = (
@@ -335,6 +339,7 @@ def run_arena(
         symmetry_rotation_count,
         should_flip_symmetry,
         use_descendant_symmetry_pair,
+        policy_temperature=descendant_policy_temperature,
         symmetry_geometric_policy_weight=(
             descendant_symmetry_geometric_policy_weight
         ),
@@ -343,6 +348,7 @@ def run_arena(
         MokaEvaluator(
             model,
             use_symmetry_ensemble=True,
+            policy_temperature=SEARCH_ROOT_POLICY_TEMPERATURE,
             symmetry_geometric_policy_weight=(
                 root_symmetry_geometric_policy_weight
             ),
@@ -697,6 +703,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
     )
+    argument_parser.add_argument(
+        "--descendant-policy-temperature",
+        type=float,
+        default=SEARCH_DESCENDANT_POLICY_TEMPERATURE,
+    )
     argument_parser.add_argument("--symmetry-rotation", type=int, default=0)
     argument_parser.add_argument("--symmetry-flip", action="store_true")
     argument_parser.add_argument(
@@ -838,6 +849,7 @@ def main() -> None:
         arguments.sequential_halving_candidates,
         arguments.symmetry_ensemble,
         arguments.descendant_symmetry_geometric_policy_weight,
+        arguments.descendant_policy_temperature,
         arguments.symmetry_rotation,
         arguments.symmetry_flip,
         arguments.adaptive_max_simulations,

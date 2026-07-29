@@ -24,6 +24,7 @@ from go_model.config import (
     SEARCH_AREA_VALUE_START_MOVE_COUNT,
     SEARCH_AREA_VALUE_RAMP_MOVE_COUNT,
     SEARCH_AREA_VALUE_WEIGHT,
+    SEARCH_DESCENDANT_POLICY_TEMPERATURE,
     SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
     SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
     SEARCH_FIRST_PLAY_URGENCY_REDUCTION,
@@ -83,6 +84,7 @@ class MokaEvaluator:
         symmetry_rotation_count: int = 0,
         should_flip_symmetry: bool = False,
         use_symmetry_pair: bool = False,
+        policy_temperature: float = SEARCH_DESCENDANT_POLICY_TEMPERATURE,
         symmetry_geometric_policy_weight: float = (
             SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
         ),
@@ -111,6 +113,7 @@ class MokaEvaluator:
         self.symmetry_rotation_count = symmetry_rotation_count
         self.should_flip_symmetry = should_flip_symmetry
         self.use_symmetry_pair = use_symmetry_pair
+        self.policy_temperature = policy_temperature
         self.symmetry_geometric_policy_weight = (
             symmetry_geometric_policy_weight
         )
@@ -254,8 +257,7 @@ class MokaEvaluator:
                             symmetry_end,
                         )
                     ]
-                    self.cache[self.get_cache_key(game_state)] = (
-                        aggregate_symmetry_policies(
+                    aggregated_policy = aggregate_symmetry_policies(
                             aligned_policies,
                             self.symmetry_geometric_policy_weight,
                             self.symmetry_trimmed_policy_weight,
@@ -267,6 +269,11 @@ class MokaEvaluator:
                             self.symmetry_rank_move_count,
                             self.symmetry_rank_minimum_top_move_vote_count,
                             self.symmetry_top_move_vote_policy_weight,
+                        )
+                    self.cache[self.get_cache_key(game_state)] = (
+                        apply_search_policy_temperature(
+                            aggregated_policy,
+                            self.policy_temperature,
                         ),
                         aggregate_symmetry_values(
                             value_array[symmetry_start:symmetry_end],
@@ -276,7 +283,10 @@ class MokaEvaluator:
             else:
                 for missing_index, game_state in enumerate(missing_game_states):
                     self.cache[self.get_cache_key(game_state)] = (
-                        policies[missing_index],
+                        apply_search_policy_temperature(
+                            policies[missing_index],
+                            self.policy_temperature,
+                        ),
                         float(value_array[missing_index]),
                     )
 

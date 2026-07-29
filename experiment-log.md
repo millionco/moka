@@ -4346,3 +4346,41 @@ Arithmetic and 0.0625 tied the lead. A fresh 20-game tie-break at opening offset
 Pure arithmetic advanced as the unique tie-break winner. On 100 untouched paired games from opening offset 3,930,000, accepted descendant weight 0.125 won 44 games, split 21 Black and 23 White, with zero caps in 284.8 seconds. Arithmetic also won 44, split 20 Black and 24 White, with zero caps in 279.8 seconds.
 
 The candidate failed to confirm the small screen gains and is rejected. Descendant geometric weight 0.125 remains accepted. The independent research control remains available for reproducibility. The checkpoint, browser artifact, search defaults, and Million website remain unchanged.
+
+## 2026-07-28 — Descendant policy temperature
+
+### Hypothesis
+
+Root-policy temperature had been calibrated, but descendant priors remained at temperature 1.0 after full symmetry and FPU reduction 0.5 changed tree allocation. A separate descendant temperature can sharpen or flatten Moka's own symmetry-aggregated priors without changing the root policy, model evaluations, payload, legal moves, or teacher access.
+
+Root evaluators in the arena and both search-data generators were explicitly pinned to the root temperature. Default and explicit descendant temperature 1.0 reproduced identical moves, passes, and outcomes.
+
+### Broad screen
+
+On 20 fresh games from opening offset 3,950,000:
+
+| Descendant temperature | Wins | Black | White | Caps | Runtime |
+| ---------------------: | ---: | ----: | ----: | ---: | ------: |
+|                   0.70 |    7 |     3 |     4 |    0 |   56.0s |
+|                   0.80 |   10 |     5 |     5 |    0 |   56.0s |
+|                   0.90 |   11 |     5 |     6 |    0 |   57.0s |
+|                   1.00 |    9 |     3 |     6 |    0 |   54.4s |
+|                   1.10 |    8 |     3 |     5 |    0 |   55.5s |
+|                   1.20 |    6 |     1 |     5 |    0 |   55.2s |
+
+Temperature 0.9 advanced as the unique screen leader. On 100 untouched paired games from opening offset 3,960,000, accepted temperature 1.0 won 48 games, split 24 Black and 24 White, with zero caps in 270.1 seconds. Temperature 0.9 also won 48, split 21 Black and 27 White, with zero caps in 268.7 seconds. It failed to confirm the screen gain and was rejected.
+
+### Local refinement
+
+The broad screen had a clear interior peak, so one bounded local refinement tested the neighboring interval on 20 fresh games from opening offset 3,970,000:
+
+| Descendant temperature | Wins | Black | White | Caps | Runtime |
+| ---------------------: | ---: | ----: | ----: | ---: | ------: |
+|                   0.85 |   10 |     4 |     6 |    0 |   57.1s |
+|                   0.90 |    9 |     3 |     6 |    0 |   58.4s |
+|                   0.95 |    7 |     3 |     4 |    0 |   55.7s |
+|                   1.00 |    7 |     3 |     4 |    0 |   59.0s |
+
+Temperature 0.85 advanced as the unique local leader. On 100 untouched paired games from opening offset 3,980,000, accepted temperature 1.0 won 44 games, split 22 Black and 22 White, with zero caps in 267.6 seconds. Temperature 0.85 won 41, split 19 Black and 22 White, with zero caps in 266.9 seconds.
+
+Both sharpened candidates failed independent confirmation. Descendant temperature 1.0 remains accepted. The independent research control remains available for reproducibility. The checkpoint, browser artifact, search defaults, and Million website remain unchanged.
