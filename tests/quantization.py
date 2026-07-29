@@ -20,6 +20,7 @@ from go_model.model import (
     checkpoint_uses_global_residual_network,
     checkpoint_uses_nested_network,
     create_moka_network_for_checkpoint,
+    get_checkpoint_global_residual_block_interval,
 )
 from go_model.quantization import (
     fake_quantize_int8_parameters,
@@ -127,6 +128,12 @@ class QuantizationTest(unittest.TestCase):
                     str(global_checkpoint_path)
                 )
             )
+            self.assertEqual(
+                get_checkpoint_global_residual_block_interval(
+                    str(global_checkpoint_path)
+                ),
+                GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+            )
             self.assertIsInstance(
                 create_moka_network_for_checkpoint(
                     str(nested_checkpoint_path)
@@ -138,6 +145,72 @@ class QuantizationTest(unittest.TestCase):
                     str(global_checkpoint_path)
                 ),
                 MokaGlobalResidualNetwork,
+            )
+
+    def test_denser_global_residual_checkpoint_preserves_and_exports(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            source_checkpoint_path = temporary_path / "source.safetensors"
+            dense_checkpoint_path = temporary_path / "dense.safetensors"
+            output_directory = temporary_path / "export"
+            source_model = MokaGlobalResidualNetwork()
+            source_model.save_weights(str(source_checkpoint_path))
+            dense_model = MokaGlobalResidualNetwork(2)
+            dense_model.load_weights(
+                str(source_checkpoint_path),
+                strict=False,
+            )
+            features = mx.random.normal(
+                (
+                    2,
+                    BOARD_SIZE,
+                    BOARD_SIZE,
+                    INPUT_PLANE_COUNT,
+                )
+            )
+            source_outputs = source_model(features)
+            dense_outputs = dense_model(features)
+            mx.eval(source_outputs, dense_outputs)
+
+            for source_output, dense_output in zip(
+                source_outputs,
+                dense_outputs,
+                strict=True,
+            ):
+                np.testing.assert_array_equal(
+                    np.asarray(source_output),
+                    np.asarray(dense_output),
+                )
+
+            dense_model.save_weights(str(dense_checkpoint_path))
+            self.assertEqual(
+                get_checkpoint_global_residual_block_interval(
+                    str(dense_checkpoint_path)
+                ),
+                2,
+            )
+            loaded_model = create_moka_network_for_checkpoint(
+                str(dense_checkpoint_path)
+            )
+            self.assertEqual(
+                loaded_model.global_residual_block_interval,
+                2,
+            )
+            _, manifest_path = export_model(
+                dense_checkpoint_path,
+                output_directory,
+                8,
+            )
+            manifest = json.loads(manifest_path.read_text())
+            self.assertEqual(
+                manifest["architecture"]["globalResidualBlockInterval"],
+                2,
+            )
+            self.assertIn(
+                "residual.1.global.hidden.weight",
+                manifest["tensors"],
             )
 
     def test_materialized_checkpoint_matches_fake_quantized_parameters(

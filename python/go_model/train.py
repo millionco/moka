@@ -14,6 +14,7 @@ from go_model.config import (
     DEFAULT_EPOCH_COUNT,
     DEFAULT_LEARNING_RATE,
     DEFAULT_RANDOM_SEED,
+    GLOBAL_RESIDUAL_BLOCK_INTERVAL,
     LISTWISE_POLICY_RANK_COUNT,
     OWNERSHIP_LOSS_WEIGHT,
     PPO_ILLEGAL_MOVE_LOGIT,
@@ -43,8 +44,8 @@ from go_model.model import (
     MokaNetwork,
     MokaQAuxiliaryNetwork,
     MokaSoftPolicyNetwork,
-    checkpoint_uses_global_residual_network,
     create_moka_network,
+    get_checkpoint_global_residual_block_interval,
 )
 from go_model.quantization import fake_quantize_int8_parameters
 from go_model.symmetry import apply_batch_board_symmetry, apply_batch_spatial_symmetry
@@ -427,15 +428,24 @@ def train(
     train_global_adapter_only: bool,
     use_int8_quantization_aware_training: bool,
     use_global_residual_network: bool,
+    global_residual_block_interval: int | None,
     train_global_residual_adapter_only: bool,
+    train_new_global_residual_adapters_only: bool,
 ) -> None:
-    if (
-        initial_checkpoint_path is not None
-        and checkpoint_uses_global_residual_network(
+    checkpoint_global_residual_block_interval = (
+        get_checkpoint_global_residual_block_interval(
             str(initial_checkpoint_path)
         )
-    ):
+        if initial_checkpoint_path is not None
+        else 0
+    )
+    if checkpoint_global_residual_block_interval > 0:
         use_global_residual_network = True
+    global_residual_block_interval = (
+        global_residual_block_interval
+        or checkpoint_global_residual_block_interval
+        or GLOBAL_RESIDUAL_BLOCK_INTERVAL
+    )
     dataset = np.load(dataset_path)
     features = dataset["features"].astype(np.float32)
     game_ids = dataset["game_ids"] if "game_ids" in dataset else np.arange(len(features))
@@ -682,6 +692,7 @@ def train(
                         use_wide_network,
                         use_global_pool_network,
                         use_global_residual_network,
+                        global_residual_block_interval,
                     )
                 )
             )
@@ -715,6 +726,7 @@ def train(
             use_wide_network,
             use_global_pool_network,
             use_global_residual_network,
+            global_residual_block_interval,
         )
         reference_model.load_weights(
             str(initial_checkpoint_path),
@@ -729,7 +741,14 @@ def train(
             )
         reference_model.freeze()
         reference_model.eval()
-    if train_global_adapter_only and train_global_residual_adapter_only:
+    selected_global_adapter_mode_count = sum(
+        [
+            train_global_adapter_only,
+            train_global_residual_adapter_only,
+            train_new_global_residual_adapters_only,
+        ]
+    )
+    if selected_global_adapter_mode_count > 1:
         raise ValueError("Select only one global adapter training mode.")
     if train_global_adapter_only:
         if not use_global_pool_network:
@@ -751,6 +770,33 @@ def train(
             if isinstance(
                 residual_block,
                 GlobalNestedBottleneckBlock,
+            ):
+                residual_block.global_pooling_hidden.unfreeze()
+                residual_block.global_bias_output.unfreeze()
+    elif train_new_global_residual_adapters_only:
+        if (
+            not use_global_residual_network
+            or checkpoint_global_residual_block_interval <= 0
+            or global_residual_block_interval
+            >= checkpoint_global_residual_block_interval
+        ):
+            raise ValueError(
+                "New global-residual adapter training requires a denser "
+                "global-residual interval."
+            )
+        model.freeze()
+        for block_index, residual_block in enumerate(
+            model.residual_blocks
+        ):
+            block_number = block_index + 1
+            if (
+                isinstance(
+                    residual_block,
+                    GlobalNestedBottleneckBlock,
+                )
+                and block_number
+                % checkpoint_global_residual_block_interval
+                != 0
             ):
                 residual_block.global_pooling_hidden.unfreeze()
                 residual_block.global_bias_output.unfreeze()
@@ -794,6 +840,7 @@ def train(
             use_wide_network,
             use_global_pool_network,
             use_global_residual_network,
+            global_residual_block_interval,
         )
         if use_int8_quantization_aware_training
         else None
@@ -1069,6 +1116,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--wide", action="store_true")
     argument_parser.add_argument("--global-pool", action="store_true")
     argument_parser.add_argument("--global-residual", action="store_true")
+    argument_parser.add_argument(
+        "--global-residual-interval",
+        type=int,
+    )
     argument_parser.add_argument("--soft-policy", action="store_true")
     argument_parser.add_argument("--soft-policy-weight", type=float, default=0)
     argument_parser.add_argument("--auxiliary", action="store_true")
@@ -1091,6 +1142,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
     )
     argument_parser.add_argument(
         "--global-residual-adapter-only",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--new-global-residual-adapters-only",
         action="store_true",
     )
     argument_parser.add_argument(
@@ -1160,7 +1215,9 @@ def main() -> None:
         arguments.global_adapter_only,
         arguments.int8_quantization_aware,
         arguments.global_residual,
+        arguments.global_residual_interval,
         arguments.global_residual_adapter_only,
+        arguments.new_global_residual_adapters_only,
     )
 
 

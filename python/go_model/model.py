@@ -279,12 +279,22 @@ class MokaGlobalPoolNetwork(MokaNestedNetwork):
 
 
 class MokaGlobalResidualNetwork(MokaNestedNetwork):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+    ) -> None:
         super().__init__()
+        if global_residual_block_interval <= 0:
+            raise ValueError(
+                "Global-residual block interval must be positive."
+            )
+        self.global_residual_block_interval = (
+            global_residual_block_interval
+        )
         self.residual_blocks = [
             (
                 GlobalNestedBottleneckBlock()
-                if (block_index + 1) % GLOBAL_RESIDUAL_BLOCK_INTERVAL == 0
+                if (block_index + 1) % global_residual_block_interval == 0
                 else NestedBottleneckBlock()
             )
             for block_index in range(NESTED_RESIDUAL_BLOCK_COUNT)
@@ -562,9 +572,10 @@ def create_moka_network(
     use_wide_network: bool,
     use_global_pool_network: bool = False,
     use_global_residual_network: bool = False,
+    global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
 ) -> MokaNetwork:
     if use_global_residual_network:
-        return MokaGlobalResidualNetwork()
+        return MokaGlobalResidualNetwork(global_residual_block_interval)
 
     if use_global_pool_network:
         return MokaGlobalPoolNetwork()
@@ -590,12 +601,34 @@ def create_moka_network(
 def checkpoint_uses_global_residual_network(
     checkpoint_path: str,
 ) -> bool:
+    return get_checkpoint_global_residual_block_interval(checkpoint_path) > 0
+
+
+def get_checkpoint_global_residual_block_interval(
+    checkpoint_path: str,
+) -> int:
     parameters = mx.load(checkpoint_path)
-    return any(
-        parameter_name.startswith("residual_blocks.")
-        and ".global_pooling_hidden." in parameter_name
-        for parameter_name in parameters
+    block_numbers = sorted(
+        {
+            int(parameter_name.split(".")[1]) + 1
+            for parameter_name in parameters
+            if parameter_name.startswith("residual_blocks.")
+            and ".global_pooling_hidden." in parameter_name
+        }
     )
+    if not block_numbers:
+        return 0
+
+    block_interval = block_numbers[0]
+    if block_numbers != list(
+        range(
+            block_interval,
+            NESTED_RESIDUAL_BLOCK_COUNT + 1,
+            block_interval,
+        )
+    ):
+        raise ValueError("Unsupported irregular global-residual checkpoint.")
+    return block_interval
 
 
 def checkpoint_uses_nested_network(checkpoint_path: str) -> bool:
@@ -616,7 +649,11 @@ def create_moka_network_for_checkpoint(
     use_wide_network: bool = False,
     use_global_pool_network: bool = False,
     use_global_residual_network: bool = False,
+    global_residual_block_interval: int | None = None,
 ) -> MokaNetwork:
+    checkpoint_global_residual_block_interval = (
+        get_checkpoint_global_residual_block_interval(checkpoint_path)
+    )
     return create_moka_network(
         (
             use_nested_network
@@ -629,6 +666,11 @@ def create_moka_network_for_checkpoint(
         use_global_pool_network,
         (
             use_global_residual_network
-            or checkpoint_uses_global_residual_network(checkpoint_path)
+            or checkpoint_global_residual_block_interval > 0
+        ),
+        (
+            global_residual_block_interval
+            or checkpoint_global_residual_block_interval
+            or GLOBAL_RESIDUAL_BLOCK_INTERVAL
         ),
     )

@@ -5061,3 +5061,45 @@ All candidates also lowered standard b18 loss on the independent 128- and 256-vi
 | Q-rank 0.20 |   10 |     6 |     4 |    0 |
 
 Weights 0.05 and 0.20 tied exactly for the lead, including color split and cap count. Selecting one after observing the tie would add bias, so neither advances. The child-Q objective remains available for reproducible future experiments, but the checkpoint and browser artifact remain unchanged.
+
+## 2026-07-28 — Denser internal global context
+
+### Architecture
+
+The promoted network injects pooled global context after blocks 4, 8, and 12. An interval-2 variant adds zero-initialized adapters after blocks 2, 6, and 10 while retaining the three promoted adapters. Loading the promoted checkpoint produces exactly equal logits and values before training.
+
+The denser network adds 1,224 parameters, from 105,353 to 106,577. Its browser binary is 115,376 bytes, 1,728 bytes larger than the promoted artifact. Checkpoint loading and export now infer the periodic adapter layout, so interval-2 experiments cannot silently run through an interval-4 model.
+
+### Updating all six adapters
+
+Three exact-QAT candidates used the same direct-b18 corpus, three epochs, seed 330, policy-preservation weight 0.25, and learning rates 0.000003, 0.00001, and 0.00003. All improved b18 loss on every inspected 64-, 128-, and 256-visit test split. The highest rate regressed symmetry-consensus loss and was rejected offline.
+
+| Player          | b18 3,000,000 loss | b18 3,100,000 loss | b18 3,500,000 loss | Consensus loss / top move |
+| :-------------- | -----------------: | -----------------: | -----------------: | ------------------------: |
+| Control         |             2.8980 |             2.7451 |             2.9435 |            2.2552 / 75.6% |
+| Interval-2 3e-6 |             2.8855 |             2.7347 |             2.9191 |            2.2517 / 76.0% |
+| Interval-2 1e-5 |             2.8752 |             2.7270 |             2.8943 |            2.2544 / 74.7% |
+| Interval-2 3e-5 |             2.8690 |             2.7234 |             2.8753 |            2.2633 / 72.9% |
+
+The two consensus-safe candidates used 20 fresh paired games from opening offset 4,570,000:
+
+| Player          | Wins | Black | White | Caps |
+| :-------------- | ---: | ----: | ----: | ---: |
+| Control         |    9 |     5 |     4 |    0 |
+| Interval-2 3e-6 |    9 |     6 |     3 |    0 |
+| Interval-2 1e-5 |    6 |     3 |     3 |    0 |
+
+Neither candidate beat control, so both were rejected.
+
+### Updating only new adapters
+
+A second family froze the three promoted adapters and trained only the new adapters at blocks 2, 6, and 10. Learning rates 0.00001, 0.00003, and 0.0001 all improved b18 loss; only 0.00001 also improved consensus loss and top-move agreement, from 2.2552 / 75.6% to 2.2511 / 76.4%.
+
+On 20 fresh games from opening offset 4,580,000, control won seven games, split 2 Black / 5 White, while the frozen candidate won nine, split 5 Black / 4 White. Both had zero caps. The candidate advanced to 100 untouched games at opening offset 4,590,000:
+
+| Player    | Wins | Black | White | Caps | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | ------: |
+| Control   |   47 |    20 |    27 |    0 |  497.3s |
+| Candidate |   44 |    16 |    28 |    0 |  515.0s |
+
+The screen gain reversed to a three-game loss, driven by four lost Black games. The denser architecture is rejected without a second confirmation block. Generalized checkpoint and export support remain available for reproducibility, but the promoted checkpoint and browser artifact remain unchanged.

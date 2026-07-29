@@ -29,8 +29,8 @@ from go_model.config import (
 )
 from go_model.model import (
     MokaNetwork,
-    checkpoint_uses_global_residual_network,
     create_moka_network_for_checkpoint,
+    get_checkpoint_global_residual_block_interval,
 )
 
 
@@ -38,6 +38,7 @@ def get_named_parameters(
     model: MokaNetwork,
     use_nested_network: bool = False,
     use_global_residual_network: bool = False,
+    global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
 ) -> list[tuple[str, mx.array]]:
     named_parameters = [
         ("stem.weight", model.stem.weight),
@@ -85,7 +86,7 @@ def get_named_parameters(
             )
             if (
                 use_global_residual_network
-                and (block_index + 1) % GLOBAL_RESIDUAL_BLOCK_INTERVAL == 0
+                and (block_index + 1) % global_residual_block_interval == 0
             ):
                 named_parameters.extend(
                     [
@@ -173,14 +174,24 @@ def export_model(
     use_nested_network: bool = False,
     use_global_residual_network: bool = False,
 ) -> tuple[Path, Path]:
+    checkpoint_global_residual_block_interval = (
+        get_checkpoint_global_residual_block_interval(
+            str(checkpoint_path)
+        )
+    )
+    global_residual_block_interval = (
+        checkpoint_global_residual_block_interval
+        or GLOBAL_RESIDUAL_BLOCK_INTERVAL
+    )
     use_global_residual_network = (
         use_global_residual_network
-        or checkpoint_uses_global_residual_network(str(checkpoint_path))
+        or checkpoint_global_residual_block_interval > 0
     )
     model = create_moka_network_for_checkpoint(
         str(checkpoint_path),
         use_nested_network=use_nested_network,
         use_global_residual_network=use_global_residual_network,
+        global_residual_block_interval=global_residual_block_interval,
     )
     model.load_weights(str(checkpoint_path))
     mx.eval(model.parameters())
@@ -191,6 +202,7 @@ def export_model(
         model,
         use_nested_network or use_global_residual_network,
         use_global_residual_network,
+        global_residual_block_interval,
     ):
         values = np.asarray(parameter, dtype=np.float32)
 
@@ -308,7 +320,7 @@ def export_model(
         )
     if use_global_residual_network:
         architecture["globalResidualBlockInterval"] = (
-            GLOBAL_RESIDUAL_BLOCK_INTERVAL
+            global_residual_block_interval
         )
         architecture["globalResidualHiddenChannelCount"] = (
             GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT
