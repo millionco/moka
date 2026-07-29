@@ -5181,3 +5181,39 @@ The two conservative candidates used 20 paired games from opening offset 4,810,0
 | Value 3e-4 |    9 |     3 |     6 |    0 |   94.3s |
 
 Neither candidate improved aggregate wins, so the family is rejected. Global-value checkpoints remain research-only, and export now rejects them explicitly rather than silently omitting the unsupported head. The promoted checkpoint and browser artifact remain unchanged.
+
+## 2026-07-28 — Search-guided outcome optimization
+
+### Motivation and infrastructure
+
+Earlier GRPO used Moka's raw policy, which won only 85 of 1,024 games in its best corpus. The promoted global-context player is substantially stronger when it uses its deployed search, so the outcome collector now supports Moka search rollouts, visit-policy sampling, and a greedy b6c96 opponent. KataGo remains an offline opponent and label source; candidate inference uses only Moka.
+
+The policy optimizer now supports exact INT8-aware updates and can freeze every tensor except the three global residual adapters. It also accepts an explicit optimization mask, allowing a completed trajectory to credit a selected decision without treating every later move as an independent policy-gradient sample.
+
+### Whole-trajectory search GRPO
+
+The first corpus sampled Moka moves from 32-evaluation search and completed games against greedy b6c96. It contained 256 games, 16,826 positions, and 8,394 Moka decisions. Moka won 48 games, split 27 as Black and 21 as White. Thirty-three of 64 same-opening, same-color groups varied in outcome. The compressed corpus SHA-256 was `ce320a94d99b6db90417c9065345b6b5f9e20b2a378a2862f69c857d6a76cb42`.
+
+Three one-epoch, exact-QAT, adapter-only updates used learning rates 0.0000003, 0.000001, and 0.000003. Held-out group-relative loss improved monotonically, so the predeclared 0.000003 candidate was the unique offline selection. On 20 fresh games from opening offset 4,900,000:
+
+| Player    | Wins | Black | White | Caps | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | ------: |
+| Control   |    7 |     3 |     4 |    0 |   79.6s |
+| Candidate |    6 |     3 |     3 |    0 |   82.3s |
+
+The candidate was rejected. Search produced denser successful trajectories, but assigning one terminal advantage to every sampled move still gave weak credit assignment.
+
+### Single-decision counterfactual outcomes
+
+A second collector varied exactly one Moka decision per shared state. Each four-game group forced the four strongest candidates by search visits and prior, then completed every branch with deterministic 32-evaluation Moka search and greedy b6c96. Only the forced decision entered optimization.
+
+The 128-game corpus contained 32 groups and four distinct actions in every group. Moka won 37 branches, split 17 as Black and 20 as White; 23 groups varied in outcome. Candidate ranks one through four won 11, 11, 8, and 7 games respectively, showing that completed outcomes added information beyond visit rank. The compressed corpus SHA-256 was `920f475667a65686563903faf4935c3b85a43e979760e4c9ce963f829dfa0592`.
+
+Three four-epoch, exact-QAT, adapter-only updates used learning rates 0.000001, 0.000003, and 0.00001. The largest rate was again the unique held-out-loss winner. On 20 fresh games from opening offset 4,910,000:
+
+| Player    | Wins | Black | White | Caps | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | ------: |
+| Control   |    9 |     2 |     7 |    0 |   53.9s |
+| Candidate |    7 |     2 |     5 |    0 |   71.8s |
+
+Direct action credit was cleaner but still overfit the small set of counterfactual states. The candidate and whole-trajectory family are rejected. The search-guided collector and exact-QAT optimizer remain for larger, independently replicated corpora; the promoted checkpoint, browser artifact, and Million website remain unchanged.

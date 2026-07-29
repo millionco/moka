@@ -29,9 +29,11 @@ from go_model.config import (
     VALIDATION_BUCKET_INDEX,
 )
 from go_model.model import (
+    GlobalNestedBottleneckBlock,
     MokaNetwork,
     create_moka_network_for_checkpoint,
 )
+from go_model.quantization import fake_quantize_int8_parameters
 
 
 def calculate_policy_optimization_loss(
@@ -301,13 +303,20 @@ def optimize_policy(
     use_wide_network: bool,
     use_n_distill: bool,
     freeze_trunk: bool,
+    train_global_residual_adapters_only: bool,
+    use_int8_quantization_aware_training: bool,
 ) -> None:
     dataset = np.load(dataset_path)
     all_features = dataset["features"].astype(np.float32)
     all_game_ids = dataset["game_ids"]
     all_legal_masks = dataset["legal_masks"]
     all_moka_action_masks = dataset["moka_action_masks"]
-    moka_action_indexes = np.flatnonzero(all_moka_action_masks)
+    optimization_masks = (
+        dataset["optimization_masks"]
+        if "optimization_masks" in dataset
+        else all_moka_action_masks
+    )
+    moka_action_indexes = np.flatnonzero(optimization_masks)
     features = all_features[moka_action_indexes]
     actions = dataset["actions"][moka_action_indexes].astype(np.int32)
     game_ids = all_game_ids[moka_action_indexes]
@@ -418,15 +427,57 @@ def optimize_policy(
     )
     random_generator = np.random.default_rng(random_seed)
     mx.random.seed(random_seed)
-    if grpo_group_size == 0 or freeze_trunk:
+    if freeze_trunk and train_global_residual_adapters_only:
+        raise ValueError("Select only one policy optimization freeze mode.")
+    if train_global_residual_adapters_only:
+        model.freeze()
+        trainable_adapter_count = 0
+        for residual_block in model.residual_blocks:
+            if isinstance(residual_block, GlobalNestedBottleneckBlock):
+                residual_block.global_pooling_hidden.unfreeze()
+                residual_block.global_bias_output.unfreeze()
+                trainable_adapter_count += 1
+        if trainable_adapter_count == 0:
+            raise ValueError(
+                "Global residual adapter training requires a "
+                "global-residual checkpoint."
+            )
+    elif grpo_group_size == 0 or freeze_trunk:
         model.freeze()
         model.policy_convolution.unfreeze()
         model.policy_linear.unfreeze()
     optimizer = optim.AdamW(learning_rate=learning_rate)
-    loss_and_grad = nn.value_and_grad(
-        model,
-        calculate_policy_optimization_loss,
+    quantized_model = (
+        create_moka_network_for_checkpoint(str(initial_checkpoint_path))
+        if use_int8_quantization_aware_training
+        else None
     )
+    if quantized_model is not None:
+        quantized_model.update(
+            fake_quantize_int8_parameters(model.parameters())
+        )
+        mx.eval(quantized_model.parameters())
+
+        def calculate_quantized_policy_loss(
+            parameters: dict,
+            *loss_arguments: object,
+        ) -> mx.array:
+            quantized_model.update(
+                fake_quantize_int8_parameters(parameters)
+            )
+            return calculate_policy_optimization_loss(
+                quantized_model,
+                *loss_arguments,
+            )
+
+        loss_and_grad = mx.value_and_grad(
+            calculate_quantized_policy_loss
+        )
+    else:
+        loss_and_grad = nn.value_and_grad(
+            model,
+            calculate_policy_optimization_loss,
+        )
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     best_validation_loss = float("inf")
 
@@ -436,8 +487,7 @@ def optimize_policy(
 
         for batch_start in range(0, len(shuffled_indexes), batch_size):
             batch_indexes = shuffled_indexes[batch_start : batch_start + batch_size]
-            loss, gradients = loss_and_grad(
-                model,
+            loss_arguments = (
                 mx.array(features[batch_indexes], dtype=mx.float32),
                 mx.array(actions[batch_indexes], dtype=mx.int32),
                 mx.array(old_log_probabilities[batch_indexes], dtype=mx.float32),
@@ -450,12 +500,28 @@ def optimize_policy(
                 ),
                 distillation_weight,
             )
+            loss, gradients = (
+                loss_and_grad(model.parameters(), *loss_arguments)
+                if quantized_model is not None
+                else loss_and_grad(model, *loss_arguments)
+            )
             optimizer.update(model, gradients)
-            mx.eval(model.parameters(), optimizer.state, loss)
+            if quantized_model is not None:
+                quantized_model.update(
+                    fake_quantize_int8_parameters(model.parameters())
+                )
+                mx.eval(
+                    model.parameters(),
+                    quantized_model.parameters(),
+                    optimizer.state,
+                    loss,
+                )
+            else:
+                mx.eval(model.parameters(), optimizer.state, loss)
             training_losses.append(float(loss.item()))
 
         validation_loss = evaluate_policy_loss(
-            model,
+            quantized_model if quantized_model is not None else model,
             features[validation_indexes],
             actions[validation_indexes],
             old_log_probabilities[validation_indexes],
@@ -477,8 +543,12 @@ def optimize_policy(
             model.save_weights(str(checkpoint_path))
 
     model.load_weights(str(checkpoint_path))
+    if quantized_model is not None:
+        quantized_model.update(
+            fake_quantize_int8_parameters(model.parameters())
+        )
     test_loss = evaluate_policy_loss(
-        model,
+        quantized_model if quantized_model is not None else model,
         features[test_indexes],
         actions[test_indexes],
         old_log_probabilities[test_indexes],
@@ -547,6 +617,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--wide", action="store_true")
     argument_parser.add_argument("--n-distill", action="store_true")
     argument_parser.add_argument("--freeze-trunk", action="store_true")
+    argument_parser.add_argument(
+        "--global-residual-adapter-only",
+        action="store_true",
+    )
+    argument_parser.add_argument("--int8-qat", action="store_true")
     argument_parser.add_argument("--seed", type=int, default=DEFAULT_RANDOM_SEED)
     return argument_parser
 
@@ -582,6 +657,8 @@ def main() -> None:
         arguments.wide,
         arguments.n_distill,
         arguments.freeze_trunk,
+        arguments.global_residual_adapter_only,
+        arguments.int8_qat,
     )
 
 

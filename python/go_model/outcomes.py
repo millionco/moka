@@ -16,13 +16,22 @@ from go_model.config import (
     GRPO_AREA_MARGIN_SCALE_POINTS,
     GRPO_AREA_MARGIN_WEIGHT,
     GRPO_OPENING_MOVE_COUNTS,
+    MINIMUM_TEACHER_PASS_MOVE_COUNT,
     OUTCOME_BATCH_SIZE,
     OUTCOME_DEFAULT_GAME_COUNT,
+    OUTCOME_SEARCH_POLICY_TEMPERATURE,
     POLICY_MOVE_COUNT,
     PPO_PROBABILITY_EPSILON,
+    SEARCH_ROOT_POLICY_TEMPERATURE,
+    SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
 from go_model.model import create_moka_network_for_checkpoint
+from go_model.search import (
+    MokaEvaluator,
+    MokaSearchSession,
+    apply_search_policy_temperature,
+)
 from go_model.teacher import KataGoTeacher
 
 
@@ -85,7 +94,17 @@ def generate_outcome_dataset(
     guidance_teacher_checkpoint_path: Path | None,
     katago_source_path: Path,
     use_wide_network: bool,
+    search_simulation_count: int,
+    search_policy_temperature: float,
+    use_greedy_opponent: bool,
+    use_counterfactual_first_action: bool,
 ) -> dict[str, np.ndarray]:
+    if use_counterfactual_first_action and (
+        group_size == 0 or search_simulation_count == 0
+    ):
+        raise ValueError(
+            "Counterfactual first actions require grouped search rollouts."
+        )
     random_generator = np.random.default_rng(random_seed)
     model = create_moka_network_for_checkpoint(
         str(checkpoint_path),
@@ -97,6 +116,15 @@ def generate_outcome_dataset(
     )
     model.load_weights(str(checkpoint_path))
     model.eval()
+    evaluator = MokaEvaluator(model)
+    root_evaluator = MokaEvaluator(
+        model,
+        use_symmetry_ensemble=True,
+        policy_temperature=SEARCH_ROOT_POLICY_TEMPERATURE,
+        symmetry_geometric_policy_weight=(
+            SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT
+        ),
+    )
     opponent = KataGoTeacher(opponent_path)
     if guidance_teacher_checkpoint_path:
         from go_model.strong_teacher import StrongKataGoTeacher
@@ -120,6 +148,7 @@ def generate_outcome_dataset(
     actions: list[int] = []
     baselines: list[float] = []
     moka_action_masks: list[bool] = []
+    optimization_masks: list[bool] = []
     legal_masks: list[np.ndarray] = []
     old_log_probabilities: list[float] = []
     teacher_action_advantages: list[float] = []
@@ -127,9 +156,17 @@ def generate_outcome_dataset(
     teacher_values: list[float] = []
     pending_indexes: dict[int, list[int]] = {}
     previous_position_indexes: dict[int, int] = {}
+    moka_action_counts = np.zeros(game_count, dtype=np.int32)
     active_game_ids = list(range(min(batch_size, game_count)))
     game_states = [
         initial_game_states[game_id].copy() for game_id in active_game_ids
+    ]
+    search_sessions = [
+        MokaSearchSession(
+            evaluator,
+            root_evaluator=root_evaluator,
+        )
+        for _ in active_game_ids
     ]
     next_game_id = len(active_game_ids)
     completed_game_count = 0
@@ -180,10 +217,80 @@ def generate_outcome_dataset(
                 if is_moka_turn
                 else opponent_evaluations[game_index][0]
             )
-            move = sample_rollout_move(game_state, policy, random_generator)
+            if is_moka_turn and search_simulation_count > 0:
+                search_session = search_sessions[game_index]
+                search_root = search_session.align_root(game_state)
+                search_move, search_policy = (
+                    search_session.select_move_with_policy(
+                        game_state,
+                        search_simulation_count,
+                    )
+                )
+                if (
+                    use_counterfactual_first_action
+                    and moka_action_counts[game_id] == 0
+                ):
+                    candidate_rank = (
+                        game_id % (group_size * 2)
+                    ) // 2
+                    ranked_moves = sorted(
+                        search_root.children,
+                        key=lambda candidate_move: (
+                            search_root.children[
+                                candidate_move
+                            ].visit_count,
+                            search_root.children[candidate_move].prior,
+                        ),
+                        reverse=True,
+                    )
+                    move = int(
+                        ranked_moves[
+                            min(candidate_rank, len(ranked_moves) - 1)
+                        ]
+                    )
+                elif use_counterfactual_first_action:
+                    move = search_move
+                else:
+                    tempered_search_policy = (
+                        apply_search_policy_temperature(
+                            search_policy,
+                            search_policy_temperature,
+                        )
+                    )
+                    move = sample_rollout_move(
+                        game_state,
+                        tempered_search_policy,
+                        random_generator,
+                    )
+                search_session.root = search_root.children[move]
+            elif not is_moka_turn and use_greedy_opponent:
+                selectable_moves = np.flatnonzero(legal_mask)
+                if game_state.move_count < MINIMUM_TEACHER_PASS_MOVE_COUNT:
+                    selectable_moves = selectable_moves[
+                        selectable_moves < POLICY_MOVE_COUNT - 1
+                    ]
+                move = int(
+                    selectable_moves[
+                        np.argmax(policy[selectable_moves])
+                    ]
+                )
+            else:
+                move = sample_rollout_move(
+                    game_state,
+                    policy,
+                    random_generator,
+                )
             actions.append(move)
             baselines.append(moka_value if is_moka_turn else 0)
             moka_action_masks.append(is_moka_turn)
+            optimization_masks.append(
+                is_moka_turn
+                and (
+                    not use_counterfactual_first_action
+                    or moka_action_counts[game_id] == 0
+                )
+            )
+            moka_action_counts[game_id] += int(is_moka_turn)
             old_log_probabilities.append(
                 float(np.log(max(moka_policy[move], PPO_PROBABILITY_EPSILON)))
                 if is_moka_turn
@@ -221,11 +328,16 @@ def generate_outcome_dataset(
             completed_game_count += 1
             if next_game_id < game_count:
                 game_states[game_index] = initial_game_states[next_game_id].copy()
+                search_sessions[game_index] = MokaSearchSession(
+                    evaluator,
+                    root_evaluator=root_evaluator,
+                )
                 active_game_ids[game_index] = next_game_id
                 next_game_id += 1
             else:
                 del game_states[game_index]
                 del active_game_ids[game_index]
+                del search_sessions[game_index]
 
         should_report_progress = (
             completed_game_count > 0
@@ -243,6 +355,10 @@ def generate_outcome_dataset(
         "game_ids": np.asarray(game_ids, dtype=np.int32),
         "legal_masks": np.asarray(legal_masks, dtype=np.bool_),
         "moka_action_masks": np.asarray(moka_action_masks, dtype=np.bool_),
+        "optimization_masks": np.asarray(
+            optimization_masks,
+            dtype=np.bool_,
+        ),
         "old_log_probabilities": np.asarray(
             old_log_probabilities,
             dtype=np.float16,
@@ -279,6 +395,17 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--grpo-group-size", type=int, default=0)
     argument_parser.add_argument("--guidance-teacher-checkpoint", type=Path)
     argument_parser.add_argument("--wide", action="store_true")
+    argument_parser.add_argument("--search-simulations", type=int, default=0)
+    argument_parser.add_argument(
+        "--search-policy-temperature",
+        type=float,
+        default=OUTCOME_SEARCH_POLICY_TEMPERATURE,
+    )
+    argument_parser.add_argument("--greedy-opponent", action="store_true")
+    argument_parser.add_argument(
+        "--counterfactual-first-action",
+        action="store_true",
+    )
     argument_parser.add_argument(
         "--katago-source",
         type=Path,
@@ -299,6 +426,10 @@ def main() -> None:
         arguments.guidance_teacher_checkpoint,
         arguments.katago_source,
         arguments.wide,
+        arguments.search_simulations,
+        arguments.search_policy_temperature,
+        arguments.greedy_opponent,
+        arguments.counterfactual_first_action,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)
