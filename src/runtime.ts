@@ -20,15 +20,24 @@ const getElementCount = (shape: number[]) =>
 const isSupportedManifest = (manifest: GoModelManifest) => {
   const residualBlockKind =
     manifest.architecture.residualBlockKind ?? GO_MODEL_STANDARD_RESIDUAL_BLOCK_KIND;
+  const globalResidualBlockInterval = manifest.architecture.globalResidualBlockInterval ?? 0;
+  const globalResidualHiddenChannelCount =
+    manifest.architecture.globalResidualHiddenChannelCount ?? 0;
   const isResidualBlockSupported =
     residualBlockKind === GO_MODEL_STANDARD_RESIDUAL_BLOCK_KIND ||
     (residualBlockKind === GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND &&
       (manifest.architecture.bottleneckChannelCount ?? 0) > 0);
+  const isGlobalResidualConfigurationSupported =
+    (globalResidualBlockInterval === 0 && globalResidualHiddenChannelCount === 0) ||
+    (residualBlockKind === GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND &&
+      globalResidualBlockInterval > 0 &&
+      globalResidualHiddenChannelCount > 0);
 
   return (
     (manifest.format === GO_MODEL_INT4_FORMAT || manifest.format === GO_MODEL_INT8_FORMAT) &&
     manifest.version === GO_MODEL_VERSION &&
-    isResidualBlockSupported
+    isResidualBlockSupported &&
+    isGlobalResidualConfigurationSupported
   );
 };
 
@@ -46,6 +55,39 @@ const addAndApplyRelu = (leftValues: Float32Array, rightValues: Float32Array) =>
   }
 
   return leftValues;
+};
+
+const addChannelBias = (values: Float32Array, channelCount: number, biases: Float32Array) => {
+  for (let valueIndex = 0; valueIndex < values.length; valueIndex += 1) {
+    values[valueIndex] += biases[valueIndex % channelCount];
+  }
+
+  return values;
+};
+
+const getSpatialMeanAndMaximumValues = (
+  values: Float32Array,
+  boardSize: number,
+  channelCount: number,
+) => {
+  const positionCount = boardSize * boardSize;
+  const pooledValues = new Float32Array(channelCount * 2);
+  pooledValues.fill(Number.NEGATIVE_INFINITY, channelCount);
+
+  for (let positionIndex = 0; positionIndex < positionCount; positionIndex += 1) {
+    const positionOffset = positionIndex * channelCount;
+
+    for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
+      const value = values[positionOffset + channelIndex];
+      pooledValues[channelIndex] += value / positionCount;
+      pooledValues[channelCount + channelIndex] = Math.max(
+        pooledValues[channelCount + channelIndex],
+        value,
+      );
+    }
+  }
+
+  return pooledValues;
 };
 
 const convolve = (
@@ -260,6 +302,11 @@ class GoModelRuntime {
       const prefix = `residual.${residualBlockIndex}`;
       const isNestedBlock = architecture.residualBlockKind === GO_MODEL_NESTED_RESIDUAL_BLOCK_KIND;
       const bottleneckChannelCount = architecture.bottleneckChannelCount ?? 0;
+      const globalResidualBlockInterval = architecture.globalResidualBlockInterval ?? 0;
+      const isGlobalResidualBlock =
+        isNestedBlock &&
+        globalResidualBlockInterval > 0 &&
+        (residualBlockIndex + 1) % globalResidualBlockInterval === 0;
       const firstBlockInputs = isNestedBlock
         ? applyRelu(
             convolve(
@@ -274,7 +321,7 @@ class GoModelRuntime {
             ),
           )
         : trunkValues;
-      const hiddenValues = applyRelu(
+      let hiddenValues = applyRelu(
         convolve(
           firstBlockInputs,
           architecture.boardSize,
@@ -286,6 +333,28 @@ class GoModelRuntime {
           tensor(`${prefix}.first.bias`),
         ),
       );
+      if (isGlobalResidualBlock) {
+        const globalValues = getSpatialMeanAndMaximumValues(
+          hiddenValues,
+          architecture.boardSize,
+          bottleneckChannelCount,
+        );
+        const globalHidden = applyRelu(
+          applyLinear(
+            globalValues,
+            architecture.globalResidualHiddenChannelCount ?? 0,
+            tensor(`${prefix}.global.hidden.weight`),
+            tensor(`${prefix}.global.hidden.bias`),
+          ),
+        );
+        const globalBias = applyLinear(
+          globalHidden,
+          bottleneckChannelCount,
+          tensor(`${prefix}.global.output.weight`),
+          tensor(`${prefix}.global.output.bias`),
+        );
+        hiddenValues = addChannelBias(hiddenValues, bottleneckChannelCount, globalBias);
+      }
       const secondBlockValues = convolve(
         hiddenValues,
         architecture.boardSize,

@@ -18,7 +18,7 @@ from go_model.config import (
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
-from go_model.model import MokaNestedNetwork
+from go_model.model import create_moka_network_for_checkpoint
 from go_model.search import MokaEvaluator, MokaSearchSession
 from go_model.teacher import KataGoTeacher
 
@@ -55,7 +55,7 @@ def diagnose_arena(
     opening_offset: int,
     simulation_count: int,
 ) -> dict:
-    model = MokaNestedNetwork()
+    model = create_moka_network_for_checkpoint(str(checkpoint_path))
     model.load_weights(str(checkpoint_path))
     model.eval()
     teacher = KataGoTeacher(teacher_path)

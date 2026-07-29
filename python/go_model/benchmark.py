@@ -5,9 +5,10 @@ from pathlib import Path
 
 import mlx.core as mx
 import numpy as np
+from mlx.utils import tree_flatten
 
 from go_model.config import BOARD_SIZE, INPUT_PLANE_COUNT
-from go_model.model import MokaNetwork
+from go_model.model import create_moka_network_for_checkpoint
 
 
 def percentile(values: list[float], percentile_value: float) -> float:
@@ -17,7 +18,7 @@ def percentile(values: list[float], percentile_value: float) -> float:
 
 
 def benchmark(checkpoint_path: Path, iteration_count: int) -> None:
-    model = MokaNetwork()
+    model = create_moka_network_for_checkpoint(str(checkpoint_path))
 
     if checkpoint_path.exists():
         model.load_weights(str(checkpoint_path))
@@ -40,11 +41,8 @@ def benchmark(checkpoint_path: Path, iteration_count: int) -> None:
         durations_ms.append((time.perf_counter() - start_time) * 1_000)
 
     parameter_count = sum(
-        int(np.prod(parameter.shape))
-        for _, parameter in __import__(
-            "go_model.export",
-            fromlist=["get_named_parameters"],
-        ).get_named_parameters(model)
+        parameter.size
+        for _, parameter in tree_flatten(model.parameters())
     )
     print(f"parameters: {parameter_count:,}")
     print(f"float32 weights: {parameter_count * 4:,} bytes")

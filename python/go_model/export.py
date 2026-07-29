@@ -9,6 +9,8 @@ import numpy as np
 
 from go_model.config import (
     BOARD_SIZE,
+    GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+    GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT,
     INPUT_PLANE_COUNT,
     INT4_GROUP_SIZE,
     INT4_MAXIMUM_VALUE,
@@ -25,12 +27,17 @@ from go_model.config import (
     TRUNK_CHANNEL_COUNT,
     VALUE_CHANNEL_COUNT,
 )
-from go_model.model import MokaNestedNetwork, MokaNetwork
+from go_model.model import (
+    MokaNetwork,
+    checkpoint_uses_global_residual_network,
+    create_moka_network_for_checkpoint,
+)
 
 
 def get_named_parameters(
     model: MokaNetwork,
-    use_nested_network: bool,
+    use_nested_network: bool = False,
+    use_global_residual_network: bool = False,
 ) -> list[tuple[str, mx.array]]:
     named_parameters = [
         ("stem.weight", model.stem.weight),
@@ -76,6 +83,30 @@ def get_named_parameters(
                     ),
                 ]
             )
+            if (
+                use_global_residual_network
+                and (block_index + 1) % GLOBAL_RESIDUAL_BLOCK_INTERVAL == 0
+            ):
+                named_parameters.extend(
+                    [
+                        (
+                            f"{prefix}.global.hidden.weight",
+                            residual_block.global_pooling_hidden.weight,
+                        ),
+                        (
+                            f"{prefix}.global.hidden.bias",
+                            residual_block.global_pooling_hidden.bias,
+                        ),
+                        (
+                            f"{prefix}.global.output.weight",
+                            residual_block.global_bias_output.weight,
+                        ),
+                        (
+                            f"{prefix}.global.output.bias",
+                            residual_block.global_bias_output.bias,
+                        ),
+                    ]
+                )
         else:
             named_parameters.extend(
                 [
@@ -140,14 +171,27 @@ def export_model(
     output_directory: Path,
     quantization_bits: int,
     use_nested_network: bool = False,
+    use_global_residual_network: bool = False,
 ) -> tuple[Path, Path]:
-    model = MokaNestedNetwork() if use_nested_network else MokaNetwork()
+    use_global_residual_network = (
+        use_global_residual_network
+        or checkpoint_uses_global_residual_network(str(checkpoint_path))
+    )
+    model = create_moka_network_for_checkpoint(
+        str(checkpoint_path),
+        use_nested_network=use_nested_network,
+        use_global_residual_network=use_global_residual_network,
+    )
     model.load_weights(str(checkpoint_path))
     mx.eval(model.parameters())
     binary = bytearray()
     tensors: dict[str, dict[str, object]] = {}
 
-    for name, parameter in get_named_parameters(model, use_nested_network):
+    for name, parameter in get_named_parameters(
+        model,
+        use_nested_network or use_global_residual_network,
+        use_global_residual_network,
+    ):
         values = np.asarray(parameter, dtype=np.float32)
 
         if name.endswith(".weight"):
@@ -246,21 +290,28 @@ def export_model(
             "policyMoveCount": POLICY_MOVE_COUNT,
             "residualBlockCount": (
                 NESTED_RESIDUAL_BLOCK_COUNT
-                if use_nested_network
+                if use_nested_network or use_global_residual_network
                 else RESIDUAL_BLOCK_COUNT
             ),
             "residualBlockKind": (
                 "nested-bottleneck"
-                if use_nested_network
+                if use_nested_network or use_global_residual_network
                 else "standard"
             ),
             "scoreHiddenChannelCount": SCORE_HIDDEN_CHANNEL_COUNT,
             "trunkChannelCount": TRUNK_CHANNEL_COUNT,
             "valueChannelCount": VALUE_CHANNEL_COUNT,
     }
-    if use_nested_network:
+    if use_nested_network or use_global_residual_network:
         architecture["bottleneckChannelCount"] = (
             NESTED_BOTTLENECK_CHANNEL_COUNT
+        )
+    if use_global_residual_network:
+        architecture["globalResidualBlockInterval"] = (
+            GLOBAL_RESIDUAL_BLOCK_INTERVAL
+        )
+        architecture["globalResidualHiddenChannelCount"] = (
+            GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT
         )
     manifest = {
         "architecture": architecture,
@@ -307,6 +358,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=int,
     )
     argument_parser.add_argument("--nested", action="store_true")
+    argument_parser.add_argument("--global-residual", action="store_true")
     return argument_parser
 
 
@@ -317,6 +369,7 @@ def main() -> None:
         arguments.output,
         arguments.quantization_bits,
         arguments.nested,
+        arguments.global_residual,
     )
 
 

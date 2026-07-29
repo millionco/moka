@@ -24,7 +24,7 @@ from go_model.config import (
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
-from go_model.model import create_moka_network
+from go_model.model import create_moka_network_for_checkpoint
 from go_model.search import MokaEvaluator, MokaSearchSession, SearchNode
 from go_model.teacher import KataGoTeacher
 
@@ -99,7 +99,10 @@ def collect_search_distillation_dataset(
     if search_q_policy_temperature <= 0:
         raise ValueError("Search Q policy temperature must be positive.")
 
-    model = create_moka_network(True, False, False, False, False)
+    model = create_moka_network_for_checkpoint(
+        str(checkpoint_path),
+        use_nested_network=True,
+    )
     model.load_weights(str(checkpoint_path))
     model.eval()
     evaluator = MokaEvaluator(model)

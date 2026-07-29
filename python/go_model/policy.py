@@ -28,7 +28,10 @@ from go_model.config import (
     TEST_BUCKET_INDEX,
     VALIDATION_BUCKET_INDEX,
 )
-from go_model.model import MokaNetwork, create_moka_network
+from go_model.model import (
+    MokaNetwork,
+    create_moka_network_for_checkpoint,
+)
 
 
 def calculate_policy_optimization_loss(
@@ -325,7 +328,8 @@ def optimize_policy(
             dtype=np.float32,
         )
     )
-    model = create_moka_network(
+    model = create_moka_network_for_checkpoint(
+        str(initial_checkpoint_path),
         not use_wide_network,
         False,
         False,

@@ -1,6 +1,8 @@
 interface GoModelArchitecture {
   boardSize: number;
   bottleneckChannelCount?: number;
+  globalResidualBlockInterval?: number;
+  globalResidualHiddenChannelCount?: number;
   inputPlaneCount: number;
   policyChannelCount: number;
   policyMoveCount: number;

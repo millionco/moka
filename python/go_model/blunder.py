@@ -20,7 +20,10 @@ from go_model.config import (
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
-from go_model.model import MokaNestedNetwork
+from go_model.model import (
+    MokaNestedNetwork,
+    create_moka_network_for_checkpoint,
+)
 from go_model.symmetry import (
     aggregate_symmetry_policies,
     apply_board_symmetry,
@@ -311,7 +314,7 @@ def calculate_game_blunder_risks(
         ],
         dtype=np.float32,
     )
-    model = MokaNestedNetwork()
+    model = create_moka_network_for_checkpoint(str(checkpoint_path))
     model.load_weights(str(checkpoint_path))
     model.eval()
     selected_scores = evaluate_blunder_risk_scores(

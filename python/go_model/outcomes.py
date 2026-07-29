@@ -22,7 +22,7 @@ from go_model.config import (
     PPO_PROBABILITY_EPSILON,
 )
 from go_model.features import encode_moka_features
-from go_model.model import create_moka_network
+from go_model.model import create_moka_network_for_checkpoint
 from go_model.teacher import KataGoTeacher
 
 
@@ -87,7 +87,8 @@ def generate_outcome_dataset(
     use_wide_network: bool,
 ) -> dict[str, np.ndarray]:
     random_generator = np.random.default_rng(random_seed)
-    model = create_moka_network(
+    model = create_moka_network_for_checkpoint(
+        str(checkpoint_path),
         not use_wide_network,
         False,
         False,

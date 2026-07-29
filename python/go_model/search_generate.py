@@ -48,7 +48,7 @@ from go_model.config import (
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
 from go_model.features import encode_moka_features
-from go_model.model import MokaNestedNetwork
+from go_model.model import create_moka_network_for_checkpoint
 from go_model.search import MokaEvaluator, MokaSearchSession
 from go_model.teacher import KataGoTeacher
 
@@ -205,7 +205,7 @@ def generate_rollout_games(
     rollout_simulation_count: int,
 ) -> tuple[list[list[GameState]], list[list[int]], list[list[float]]]:
     random_generator = np.random.default_rng(random_seed)
-    model = MokaNestedNetwork()
+    model = create_moka_network_for_checkpoint(str(checkpoint_path))
     model.load_weights(str(checkpoint_path))
     model.eval()
     opponent = KataGoTeacher(opponent_path)
@@ -862,7 +862,7 @@ def create_search_dataset(
         moka_moves = np.full(len(features), BOARD_AREA, dtype=np.int16)
 
         if use_counterfactual_reanalysis and features:
-            model = MokaNestedNetwork()
+            model = create_moka_network_for_checkpoint(str(checkpoint_path))
             model.load_weights(str(checkpoint_path))
             model.eval()
             policy_logit_batches: list[np.ndarray] = []

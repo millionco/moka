@@ -6,6 +6,8 @@ from go_model.config import (
     CONTEXT_INPUT_PLANE_COUNT,
     GLOBAL_POOL_HIDDEN_CHANNEL_COUNT,
     GLOBAL_POOL_RESIDUAL_BLOCK_COUNT,
+    GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+    GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT,
     INPUT_PLANE_COUNT,
     NESTED_BOTTLENECK_CHANNEL_COUNT,
     NESTED_RESIDUAL_BLOCK_COUNT,
@@ -74,6 +76,42 @@ class NestedBottleneckBlock(nn.Module):
         hidden_values = nn.relu(self.reduce_convolution(inputs))
         hidden_values = nn.relu(self.first_spatial_convolution(hidden_values))
         hidden_values = nn.relu(self.second_spatial_convolution(hidden_values))
+        return nn.relu(inputs + self.expand_convolution(hidden_values))
+
+
+class GlobalNestedBottleneckBlock(NestedBottleneckBlock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.global_pooling_hidden = nn.Linear(
+            NESTED_BOTTLENECK_CHANNEL_COUNT * 2,
+            GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT,
+        )
+        self.global_bias_output = nn.Linear(
+            GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT,
+            NESTED_BOTTLENECK_CHANNEL_COUNT,
+        )
+        self.global_bias_output.weight = mx.zeros_like(
+            self.global_bias_output.weight
+        )
+        self.global_bias_output.bias = mx.zeros_like(
+            self.global_bias_output.bias
+        )
+
+    def __call__(self, inputs: mx.array) -> mx.array:
+        hidden_values = nn.relu(self.reduce_convolution(inputs))
+        hidden_values = nn.relu(self.first_spatial_convolution(hidden_values))
+        global_values = mx.concatenate(
+            [
+                mx.mean(hidden_values, axis=(1, 2)),
+                mx.max(hidden_values, axis=(1, 2)),
+            ],
+            axis=1,
+        )
+        global_hidden = nn.relu(self.global_pooling_hidden(global_values))
+        global_bias = self.global_bias_output(global_hidden)[:, None, None, :]
+        hidden_values = nn.relu(
+            self.second_spatial_convolution(hidden_values + global_bias)
+        )
         return nn.relu(inputs + self.expand_convolution(hidden_values))
 
 
@@ -238,6 +276,19 @@ class MokaGlobalPoolNetwork(MokaNestedNetwork):
         )
         value = mx.tanh(self.value_output(value_hidden)).squeeze(-1)
         return policy_logits, value
+
+
+class MokaGlobalResidualNetwork(MokaNestedNetwork):
+    def __init__(self) -> None:
+        super().__init__()
+        self.residual_blocks = [
+            (
+                GlobalNestedBottleneckBlock()
+                if (block_index + 1) % GLOBAL_RESIDUAL_BLOCK_INTERVAL == 0
+                else NestedBottleneckBlock()
+            )
+            for block_index in range(NESTED_RESIDUAL_BLOCK_COUNT)
+        ]
 
 
 class MokaSoftPolicyNetwork(MokaNestedNetwork):
@@ -510,7 +561,11 @@ def create_moka_network(
     use_context_network: bool,
     use_wide_network: bool,
     use_global_pool_network: bool = False,
+    use_global_residual_network: bool = False,
 ) -> MokaNetwork:
+    if use_global_residual_network:
+        return MokaGlobalResidualNetwork()
+
     if use_global_pool_network:
         return MokaGlobalPoolNetwork()
 
@@ -530,3 +585,50 @@ def create_moka_network(
         return MokaNestedNetwork()
 
     return MokaNetwork()
+
+
+def checkpoint_uses_global_residual_network(
+    checkpoint_path: str,
+) -> bool:
+    parameters = mx.load(checkpoint_path)
+    return any(
+        parameter_name.startswith("residual_blocks.")
+        and ".global_pooling_hidden." in parameter_name
+        for parameter_name in parameters
+    )
+
+
+def checkpoint_uses_nested_network(checkpoint_path: str) -> bool:
+    parameters = mx.load(checkpoint_path)
+    return any(
+        parameter_name.startswith("residual_blocks.")
+        and ".reduce_convolution." in parameter_name
+        for parameter_name in parameters
+    )
+
+
+def create_moka_network_for_checkpoint(
+    checkpoint_path: str,
+    use_nested_network: bool = False,
+    use_spatial_network: bool = False,
+    use_recurrent_network: bool = False,
+    use_context_network: bool = False,
+    use_wide_network: bool = False,
+    use_global_pool_network: bool = False,
+    use_global_residual_network: bool = False,
+) -> MokaNetwork:
+    return create_moka_network(
+        (
+            use_nested_network
+            or checkpoint_uses_nested_network(checkpoint_path)
+        ),
+        use_spatial_network,
+        use_recurrent_network,
+        use_context_network,
+        use_wide_network,
+        use_global_pool_network,
+        (
+            use_global_residual_network
+            or checkpoint_uses_global_residual_network(checkpoint_path)
+        ),
+    )

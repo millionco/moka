@@ -4858,3 +4858,93 @@ The exact accepted artifact and search settings compared the two implementations
 |      4,400,000 |   100 |                 42 |                    26 | 21 / 21            | 12 / 14               |               0 / 0 |
 
 The learned-terminal player lost 16 completed games on the frozen 100-game block and regressed as both colors. Terminal search, rollout adjudication, and opponent-pass acceptance are restored to the arena's area rule. The separate dead-stone removal API remains available for user-approved adjudication before scoring; it is not inferred from the compact network. The model and browser artifact remain unchanged.
+
+## 2026-07-28 — Current-model global output adapter
+
+### Hypothesis
+
+The zero-initialized global pooling adapter had only been tested on a much older Moka. It adds 1,432 parameters, initially reproduces the accepted model exactly, and lets global board summaries correct policy logits and value without modifying the local trunk. Re-auditing it on the accepted symmetry-distilled checkpoint tests whether current local features can support a small global correction.
+
+### Training
+
+Three adapter-only candidates used the same b18-labeled Moka positions from opening offsets 3,000,000, 3,100,000, and 3,500,000, three epochs, batch size 256, policy-preservation weight 0.25, and learning rates 0.0001, 0.0003, and 0.001. The accepted 104,129-parameter checkpoint and zero-initialized 105,561-parameter adapter produced exactly equal policy logits and values before training.
+
+The 0.001 candidate preserved held-out top-move agreement and improved value MAE from 0.6076 to 0.5963, but worsened policy loss from 2.9491 to 2.9925. Lower-rate candidates regressed more offline, leaving the MCTS tradeoff ambiguous.
+
+### Arena
+
+On 20 fresh games from opening offset 4,420,000:
+
+| Player         | Wins | Black | White | Caps |
+| :------------- | ---: | ----: | ----: | ---: |
+| Incumbent      |    7 |     3 |     4 |    0 |
+| Adapter 0.0001 |   10 |     4 |     6 |    0 |
+| Adapter 0.0003 |    7 |     2 |     5 |    0 |
+| Adapter 0.001  |    8 |     5 |     3 |    0 |
+
+The lowest-rate adapter was frozen as the unique screen winner. Two untouched 100-game blocks produced:
+
+| Opening offset | Incumbent wins | Adapter wins | Incumbent Black / White | Adapter Black / White | Incumbent / adapter caps | Incumbent / adapter runtime |
+| -------------: | -------------: | -----------: | :---------------------- | :-------------------- | -----------------------: | --------------------------: |
+|      4,430,000 |             39 |           38 | 18 / 21                 | 18 / 20               |                    0 / 0 |             293.9s / 313.0s |
+|      4,440,000 |             45 |           48 | 22 / 23                 | 25 / 23               |                    0 / 0 |             292.3s / 306.4s |
+|      **Total** |         **84** |       **86** | **40 / 44**             | **43 / 43**           |                **0 / 0** |         **586.2s / 619.4s** |
+
+The candidate's first-block loss reversed to a three-game gain. Its two-game aggregate edge is smaller than the block swing, and runtime increased 5.7%. The output adapter is rejected. The accepted architecture, checkpoint, browser artifact, and Million website remain unchanged.
+
+## 2026-07-28 — Quantized global residual context
+
+### Hypothesis
+
+The rejected output adapter can only correct the final policy and value heads after local features have already been compressed. KataGo instead injects pooled global context inside its residual trunk. Moka can approximate that method with three zero-initialized adapters after blocks 4, 8, and 12. Each adapter pools the bottleneck's spatial means and maxima, projects 32 pooled values through eight hidden channels, and broadcasts a 16-channel bias before the block's second spatial convolution.
+
+The architecture adds 1,224 parameters, from 104,129 to 105,353. Loading the accepted nested checkpoint into it produces exactly equal logits and values before training. KataGo is used only for offline labels; every arena and browser evaluation uses Moka's own compact model.
+
+### Quantization audit
+
+The accepted float-shadow checkpoint matches only 51.1% of the current model's symmetry-consensus top moves on the held-out offset-3,500,000 bucket, while its exact INT8 materialization matches 75.6%. Training the new adapters in float and quantizing afterward therefore optimizes the wrong player. The adapter-only trainer now permits the existing exact INT8 straight-through path: the complete incumbent is quantized before every forward pass while gradients update only the 12 new adapter tensors.
+
+Adapter-only consensus training was stable under QAT but did not beat the incumbent's held-out loss. It was rejected offline. Direct b18 QAT improved held-out policy loss and value error at all four screened rates:
+
+| Learning rate | Test loss | Top-move agreement | Value MAE |
+| ------------: | --------: | -----------------: | --------: |
+|     Incumbent |    2.9491 |              29.3% |    0.6076 |
+|       0.00001 |    2.9435 |              28.0% |    0.6050 |
+|       0.00003 |    2.9387 |              28.9% |    0.6030 |
+|       0.00010 |    2.9356 |              28.0% |    0.5968 |
+|       0.00030 |    2.9431 |              27.6% |    0.5803 |
+
+The candidates used the same 5,167 training rows from the 3,000,000, 3,100,000, and 3,500,000 b18 corpora, three epochs, batch size 256, policy-preservation weight 0.25, and seeds 306–309. No arena result changed their recipe.
+
+### Arena
+
+On 20 fresh paired games from opening offset 4,450,000:
+
+| Player          | Wins | Black | White | Caps | Runtime |
+| :-------------- | ---: | ----: | ----: | ---: | ------: |
+| Incumbent       |    9 |     7 |     2 |    0 |   62.1s |
+| Adapter 0.00001 |   11 |     6 |     5 |    0 |   66.6s |
+| Adapter 0.00003 |    7 |     4 |     3 |    1 |   70.1s |
+| Adapter 0.00010 |    6 |     5 |     1 |    1 |   69.2s |
+| Adapter 0.00030 |   10 |     6 |     4 |    0 |   72.5s |
+
+The smallest update was frozen as the unique cap-safe screen winner. Two untouched 100-game blocks produced:
+
+| Opening offset | Incumbent wins | Candidate wins | Incumbent Black / White | Candidate Black / White | Incumbent / candidate caps | Incumbent / candidate runtime |
+| -------------: | -------------: | -------------: | :---------------------- | :---------------------- | -------------------------: | ----------------------------: |
+|      4,460,000 |             39 |             49 | 22 / 17                 | 27 / 22                 |                      0 / 0 |               308.5s / 330.0s |
+|      4,470,000 |             39 |             46 | 18 / 21                 | 24 / 22                 |                      0 / 0 |               294.7s / 322.8s |
+|      **Total** |         **78** |         **95** | **40 / 38**             | **51 / 44**             |                  **0 / 0** |           **603.2s / 652.8s** |
+
+The candidate improves both independent blocks, adds 11 Black and six White wins, and introduces no cap. Python arena runtime increases 8.2%, partly from longer games. In the actual JavaScript runtime, 500 alternating evaluations are effectively tied: 4.160 ms for the incumbent and 4.165 ms for the candidate.
+
+### Deployment
+
+The promoted browser binary is 113,648 bytes and 100,666 bytes under deterministic gzip, up 1,728 raw bytes. Seven deterministic positions match the exact MLX checkpoint on every top move with finite outputs; numerical differences remain within the incumbent runtime's existing envelope. The promoted digests are:
+
+- float-shadow checkpoint: `9be23c3d60b8ba70ff4a8456704b921e82f0a691ec3e7d305b9830b671687d27`;
+- exact INT8 checkpoint: `be72b4e8068cc66788597979ed10414dc3a59f70d3ba19fc817e66302ff27f0a`;
+- browser binary: `d808d09f4b9dab959fc2764a16485448ae407bbd90cbdf8de6e8e8605b2c2de9`;
+- browser manifest: `94ada54b21e63ca44a8ca8669fbd0ab0ed702942eff060feb31f2f83b51a4cad`.
+
+The global-residual checkpoint and browser artifact are promoted. The accepted 64-evaluation search remains unchanged. The Million website remains untouched.

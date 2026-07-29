@@ -8,7 +8,7 @@ from go_model.config import (
     DEFAULT_BATCH_SIZE,
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
 )
-from go_model.model import MokaNestedNetwork
+from go_model.model import create_moka_network_for_checkpoint
 from go_model.symmetry import aggregate_symmetry_policies
 
 
@@ -78,7 +78,7 @@ def create_symmetry_consensus_dataset(
     symmetry_value_sets: list[np.ndarray] = []
 
     for checkpoint_path in checkpoint_paths:
-        model = MokaNestedNetwork()
+        model = create_moka_network_for_checkpoint(str(checkpoint_path))
         model.load_weights(str(checkpoint_path))
         model.eval()
         aligned_policies, symmetry_values = evaluate_aligned_symmetry_outputs(

@@ -21,7 +21,10 @@ from go_model.config import (
     REWEIGHT_ROLLOUT_REGRET_MODE,
     REWEIGHT_ROLLOUT_REGRET_CRITICAL_MODE,
 )
-from go_model.model import MokaNetwork, create_moka_network
+from go_model.model import (
+    MokaNetwork,
+    create_moka_network_for_checkpoint,
+)
 
 
 def calculate_policy_surprise_weights(
@@ -225,7 +228,8 @@ def reweight_dataset(
     dataset = np.load(dataset_path)
     features = dataset["features"].astype(np.float32)
     policies = dataset["policies"].astype(np.float32)
-    model = create_moka_network(
+    model = create_moka_network_for_checkpoint(
+        str(checkpoint_path),
         use_nested_network,
         use_spatial_network,
         use_recurrent_network,

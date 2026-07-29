@@ -27,7 +27,10 @@ from go_model.features import (
     encode_moka_context_features,
     encode_moka_features,
 )
-from go_model.model import MokaNetwork, create_moka_network
+from go_model.model import (
+    MokaNetwork,
+    create_moka_network_for_checkpoint,
+)
 from go_model.teacher import KataGoTeacher
 
 
@@ -310,7 +313,8 @@ def create_argument_parser() -> argparse.ArgumentParser:
 def main() -> None:
     arguments = create_argument_parser().parse_args()
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
-    model = create_moka_network(
+    model = create_moka_network_for_checkpoint(
+        str(arguments.checkpoint),
         arguments.nested,
         arguments.spatial,
         arguments.recurrent,

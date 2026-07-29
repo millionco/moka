@@ -16,7 +16,10 @@ from go_model.config import (
     TEST_BUCKET_INDEX,
     VALIDATION_BUCKET_INDEX,
 )
-from go_model.model import MokaNestedNetwork
+from go_model.model import (
+    MokaNestedNetwork,
+    create_moka_network_for_checkpoint,
+)
 
 
 def calculate_value_loss(
@@ -251,9 +254,13 @@ def train_value_head(
     )
     random_generator = np.random.default_rng(random_seed)
     mx.random.seed(random_seed)
-    model = MokaNestedNetwork()
+    model = create_moka_network_for_checkpoint(
+        str(initial_checkpoint_path)
+    )
     model.load_weights(str(initial_checkpoint_path))
-    reference_model = MokaNestedNetwork()
+    reference_model = create_moka_network_for_checkpoint(
+        str(initial_checkpoint_path)
+    )
     reference_model.load_weights(str(initial_checkpoint_path))
     reference_model.freeze()
     reference_model.eval()

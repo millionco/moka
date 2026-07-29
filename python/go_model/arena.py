@@ -64,7 +64,10 @@ from go_model.features import (
     encode_moka_context_features,
     encode_moka_features,
 )
-from go_model.model import MokaNetwork, create_moka_network
+from go_model.model import (
+    MokaNetwork,
+    create_moka_network_for_checkpoint,
+)
 from go_model.search import (
     MokaEvaluator,
     MokaSearchSession,
@@ -329,14 +332,17 @@ def run_arena(
         SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT
     ),
     use_shared_root_evaluator: bool = False,
+    use_global_residual_network: bool = False,
 ) -> tuple[int, int, int]:
-    model = create_moka_network(
+    model = create_moka_network_for_checkpoint(
+        str(checkpoint_path),
         use_nested_network,
         use_spatial_network,
         use_recurrent_network,
         use_context_network,
         use_wide_network,
         use_global_pool_network,
+        use_global_residual_network,
     )
     model.load_weights(
         str(checkpoint_path),
@@ -886,6 +892,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--context", action="store_true")
     argument_parser.add_argument("--wide", action="store_true")
     argument_parser.add_argument("--global-pool", action="store_true")
+    argument_parser.add_argument("--global-residual", action="store_true")
     return argument_parser
 
 
@@ -950,6 +957,7 @@ def main() -> None:
         arguments.late_search_value_start_move,
         arguments.search_evaluation_budget_extra_simulations,
         arguments.shared_root_evaluator,
+        arguments.global_residual,
     )
 
 

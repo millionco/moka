@@ -34,12 +34,14 @@ from go_model.config import (
     VALUE_LOSS_WEIGHT,
 )
 from go_model.model import (
+    GlobalNestedBottleneckBlock,
     MokaAttentionAuxiliaryNetwork,
     MokaAuxiliaryNetwork,
     MokaNestedNetwork,
     MokaNetwork,
     MokaQAuxiliaryNetwork,
     MokaSoftPolicyNetwork,
+    checkpoint_uses_global_residual_network,
     create_moka_network,
 )
 from go_model.quantization import fake_quantize_int8_parameters
@@ -360,7 +362,16 @@ def train(
     policy_preservation_weight: float,
     train_global_adapter_only: bool,
     use_int8_quantization_aware_training: bool,
+    use_global_residual_network: bool,
+    train_global_residual_adapter_only: bool,
 ) -> None:
+    if (
+        initial_checkpoint_path is not None
+        and checkpoint_uses_global_residual_network(
+            str(initial_checkpoint_path)
+        )
+    ):
+        use_global_residual_network = True
     dataset = np.load(dataset_path)
     features = dataset["features"].astype(np.float32)
     game_ids = dataset["game_ids"] if "game_ids" in dataset else np.arange(len(features))
@@ -606,6 +617,7 @@ def train(
                         use_context_network,
                         use_wide_network,
                         use_global_pool_network,
+                        use_global_residual_network,
                     )
                 )
             )
@@ -622,6 +634,7 @@ def train(
                 and not use_q_auxiliary
                 and not use_attention_auxiliary
                 and not use_global_pool_network
+                and not use_global_residual_network
             ),
         )
     reference_model = None
@@ -637,13 +650,19 @@ def train(
             use_context_network,
             use_wide_network,
             use_global_pool_network,
+            use_global_residual_network,
         )
         reference_model.load_weights(
             str(initial_checkpoint_path),
-            strict=not use_global_pool_network,
+            strict=(
+                not use_global_pool_network
+                and not use_global_residual_network
+            ),
         )
         reference_model.freeze()
         reference_model.eval()
+    if train_global_adapter_only and train_global_residual_adapter_only:
+        raise ValueError("Select only one global adapter training mode.")
     if train_global_adapter_only:
         if not use_global_pool_network:
             raise ValueError(
@@ -653,6 +672,20 @@ def train(
         model.global_pooling_hidden.unfreeze()
         model.global_policy_output.unfreeze()
         model.global_value_output.unfreeze()
+    elif train_global_residual_adapter_only:
+        if not use_global_residual_network:
+            raise ValueError(
+                "Global residual adapter training requires the "
+                "global-residual network."
+            )
+        model.freeze()
+        for residual_block in model.residual_blocks:
+            if isinstance(
+                residual_block,
+                GlobalNestedBottleneckBlock,
+            ):
+                residual_block.global_pooling_hidden.unfreeze()
+                residual_block.global_bias_output.unfreeze()
     elif freeze_trunk:
         if (
             soft_policy_loss_weight > 0
@@ -692,6 +725,7 @@ def train(
             use_context_network,
             use_wide_network,
             use_global_pool_network,
+            use_global_residual_network,
         )
         if use_int8_quantization_aware_training
         else None
@@ -965,6 +999,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--context", action="store_true")
     argument_parser.add_argument("--wide", action="store_true")
     argument_parser.add_argument("--global-pool", action="store_true")
+    argument_parser.add_argument("--global-residual", action="store_true")
     argument_parser.add_argument("--soft-policy", action="store_true")
     argument_parser.add_argument("--soft-policy-weight", type=float, default=0)
     argument_parser.add_argument("--auxiliary", action="store_true")
@@ -983,6 +1018,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
     )
     argument_parser.add_argument(
         "--global-adapter-only",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--global-residual-adapter-only",
         action="store_true",
     )
     argument_parser.add_argument(
@@ -1049,6 +1088,8 @@ def main() -> None:
         arguments.policy_preservation_weight,
         arguments.global_adapter_only,
         arguments.int8_quantization_aware,
+        arguments.global_residual,
+        arguments.global_residual_adapter_only,
     )
 
 
