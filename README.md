@@ -57,6 +57,7 @@ import {
   GoModelWorkerClient,
   createGameState,
   encodeStudentFeatures,
+  getAutomaticallyDeadMoves,
   getAreaScore,
   playMove,
   removeDeadStones,
@@ -102,14 +103,15 @@ Call `moka.dispose()` when your page or component no longer needs the model. Thi
 
 ### Adjudicate the final score
 
-Two passes stop play, but stones that both players agree are dead must be removed before area scoring. Pass their move indexes to `removeDeadStones`, then score the returned state:
+Two passes stop play, but dead stones must be removed before area scoring. Moka combines conservative pass-alive analysis with a capture aftermath to identify them automatically:
 
 ```js
+const deadMoves = getAutomaticallyDeadMoves(gameState);
 const adjudicatedState = removeDeadStones(gameState, deadMoves);
 const blackLead = getAreaScore(adjudicatedState);
 ```
 
-`removeDeadStones` returns a copy and leaves the played position unchanged. Positive scores lead for Black; negative scores lead for White, including 7 points of komi.
+Pass-alive groups and unresolved seki remain on the board. `removeDeadStones` returns a copy and leaves the played position unchanged. Positive scores lead for Black; negative scores lead for White, including 7 points of komi.
 
 ### Configure asset security
 

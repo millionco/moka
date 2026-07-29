@@ -17,6 +17,8 @@ import {
   GO_OPPONENT_FEATURE_INDEX,
   GO_OPPONENT_ONE_LIBERTY_FEATURE_INDEX,
   GO_OPPONENT_TWO_LIBERTY_FEATURE_INDEX,
+  GO_PASS_ALIVE_MAXIMUM_INTERNAL_POINT_COUNT,
+  GO_PASS_ALIVE_REQUIRED_VITAL_REGION_COUNT,
   GO_PASS_FEATURE_INDEX_OFFSET,
   GO_PASS_MOVE,
   GO_RECENT_MOVE_FEATURE_INDEXES,
@@ -273,6 +275,183 @@ const encodeStudentFeatures = (gameState: GoGameState) => {
   return features;
 };
 
+const getColorGroups = (board: Int8Array, color: number) => {
+  const groupKeyByMove = new Int16Array(GO_BOARD_AREA);
+  groupKeyByMove.fill(GO_NO_KO_MOVE);
+  const groups = new Map<number, number[]>();
+  const visitedMoves = new Set<number>();
+
+  for (let move = 0; move < GO_BOARD_AREA; move += 1) {
+    if (board[move] !== color || visitedMoves.has(move)) {
+      continue;
+    }
+
+    const stones = getGroup(board, move).stones;
+    const groupKey = stones[0];
+    groups.set(groupKey, stones);
+
+    for (const stoneMove of stones) {
+      visitedMoves.add(stoneMove);
+      groupKeyByMove[stoneMove] = groupKey;
+    }
+  }
+
+  return { groupKeyByMove, groups };
+};
+
+const getNonColorRegions = (board: Int8Array, color: number, groupKeyByMove: Int16Array) => {
+  const regions = [];
+  const visitedMoves = new Set<number>();
+
+  for (let move = 0; move < GO_BOARD_AREA; move += 1) {
+    if (board[move] === color || visitedMoves.has(move)) {
+      continue;
+    }
+
+    const pendingMoves = [move];
+    const regionMoves: number[] = [];
+    const borderingGroupKeys = new Set<number>();
+    let containsOpponent = false;
+    let internalPointCount = 0;
+    let vitalGroupKeys: Set<number> | null = null;
+
+    while (pendingMoves.length > 0) {
+      const regionMove = pendingMoves.pop();
+
+      if (regionMove === undefined || visitedMoves.has(regionMove)) {
+        continue;
+      }
+
+      visitedMoves.add(regionMove);
+      regionMoves.push(regionMove);
+      containsOpponent ||= board[regionMove] === -color;
+      const adjacentGroupKeys = new Set<number>();
+
+      for (const adjacentMove of getAdjacentMoves(regionMove)) {
+        if (board[adjacentMove] === color) {
+          const groupKey = groupKeyByMove[adjacentMove];
+          adjacentGroupKeys.add(groupKey);
+          borderingGroupKeys.add(groupKey);
+        } else if (!visitedMoves.has(adjacentMove)) {
+          pendingMoves.push(adjacentMove);
+        }
+      }
+
+      if (adjacentGroupKeys.size === 0) {
+        internalPointCount += 1;
+      }
+
+      if (board[regionMove] === GO_EMPTY_COLOR) {
+        if (vitalGroupKeys === null) {
+          vitalGroupKeys = adjacentGroupKeys;
+        } else {
+          for (const vitalGroupKey of vitalGroupKeys) {
+            if (!adjacentGroupKeys.has(vitalGroupKey)) {
+              vitalGroupKeys.delete(vitalGroupKey);
+            }
+          }
+        }
+      }
+    }
+
+    regions.push({
+      borderingGroupKeys,
+      containsOpponent,
+      internalPointCount,
+      moves: regionMoves,
+      vitalGroupKeys: vitalGroupKeys ?? new Set<number>(),
+    });
+  }
+
+  return regions;
+};
+
+const getPassAliveAnalysis = (board: Int8Array, color: number) => {
+  const { groupKeyByMove, groups } = getColorGroups(board, color);
+  const regions = getNonColorRegions(board, color, groupKeyByMove);
+  const passAliveGroupKeys = new Set(groups.keys());
+  const passAliveRegionIndexes = new Set(regions.map((_, regionIndex) => regionIndex));
+
+  while (true) {
+    const removedGroupKeys = new Set<number>();
+
+    for (const groupKey of passAliveGroupKeys) {
+      let vitalRegionCount = 0;
+
+      for (const regionIndex of passAliveRegionIndexes) {
+        if (regions[regionIndex].vitalGroupKeys.has(groupKey)) {
+          vitalRegionCount += 1;
+        }
+      }
+
+      if (vitalRegionCount < GO_PASS_ALIVE_REQUIRED_VITAL_REGION_COUNT) {
+        removedGroupKeys.add(groupKey);
+      }
+    }
+
+    if (removedGroupKeys.size === 0) {
+      break;
+    }
+
+    for (const removedGroupKey of removedGroupKeys) {
+      passAliveGroupKeys.delete(removedGroupKey);
+    }
+
+    for (const regionIndex of passAliveRegionIndexes) {
+      const doesBorderRemovedGroup = [...removedGroupKeys].some((removedGroupKey) =>
+        regions[regionIndex].borderingGroupKeys.has(removedGroupKey),
+      );
+
+      if (doesBorderRemovedGroup) {
+        passAliveRegionIndexes.delete(regionIndex);
+      }
+    }
+  }
+
+  return { groups, passAliveGroupKeys, regions };
+};
+
+const markPassAliveAreaForColor = (board: Int8Array, color: number, area: Int8Array) => {
+  const { groups, passAliveGroupKeys, regions } = getPassAliveAnalysis(board, color);
+
+  for (const groupKey of passAliveGroupKeys) {
+    for (const stoneMove of groups.get(groupKey) ?? []) {
+      area[stoneMove] = color;
+    }
+  }
+
+  for (const region of regions) {
+    const doesBorderNonPassAliveGroup = [...region.borderingGroupKeys].some(
+      (groupKey) => !passAliveGroupKeys.has(groupKey),
+    );
+    const isPassAliveRegion =
+      region.internalPointCount <= GO_PASS_ALIVE_MAXIMUM_INTERNAL_POINT_COUNT &&
+      !doesBorderNonPassAliveGroup &&
+      groups.size > 0;
+    const isSafeTerritory =
+      !region.containsOpponent && !doesBorderNonPassAliveGroup && groups.size > 0;
+
+    if (isPassAliveRegion || isSafeTerritory) {
+      for (const regionMove of region.moves) {
+        area[regionMove] = color;
+      }
+    } else if (!region.containsOpponent && groups.size > 0) {
+      for (const regionMove of region.moves) {
+        if (area[regionMove] === GO_EMPTY_COLOR) {
+          area[regionMove] = color;
+        }
+      }
+    }
+  }
+};
+
+const getPassAliveArea = (board: Int8Array) => {
+  const area = new Int8Array(GO_BOARD_AREA);
+  markPassAliveAreaForColor(board, GO_BLACK_COLOR, area);
+  markPassAliveAreaForColor(board, GO_WHITE_COLOR, area);
+  return area;
+};
+
 const getAreaScore = (gameState: GoGameState) => {
   let score = -GO_KOMI_POINTS;
   const visitedMoves = new Set<number>();
@@ -335,6 +514,79 @@ const removeDeadStones = (gameState: GoGameState, deadMoves: number[]) => {
   return nextState;
 };
 
+const getBestImmediateCapture = (gameState: GoGameState) => {
+  const opponentColor = -gameState.nextColor;
+  const opponentStoneCount = gameState.board.filter((color) => color === opponentColor).length;
+  let bestCaptureCount = 0;
+  let bestNextGameState: GoGameState | null = null;
+
+  for (let move = 0; move < GO_BOARD_AREA; move += 1) {
+    const nextGameState = playMove(gameState, move);
+
+    if (!nextGameState) {
+      continue;
+    }
+
+    const nextOpponentStoneCount = nextGameState.board.filter(
+      (color) => color === opponentColor,
+    ).length;
+    const captureCount = opponentStoneCount - nextOpponentStoneCount;
+
+    if (captureCount > bestCaptureCount) {
+      bestCaptureCount = captureCount;
+      bestNextGameState = nextGameState;
+    }
+  }
+
+  return bestNextGameState;
+};
+
+const getAutomaticallyDeadMoves = (gameState: GoGameState) => {
+  const passAliveArea = getPassAliveArea(gameState.board);
+  const passDeadMoves: number[] = [];
+
+  for (let move = 0; move < GO_BOARD_AREA; move += 1) {
+    if (
+      gameState.board[move] !== GO_EMPTY_COLOR &&
+      passAliveArea[move] === -gameState.board[move]
+    ) {
+      passDeadMoves.push(move);
+    }
+  }
+
+  let aftermathGameState = removeDeadStones(gameState, passDeadMoves);
+  aftermathGameState.consecutivePassCount = 0;
+
+  for (
+    let aftermathMoveCount = 0;
+    aftermathMoveCount < GO_BOARD_AREA &&
+    aftermathGameState.consecutivePassCount < GO_GAME_OVER_PASS_COUNT;
+    aftermathMoveCount += 1
+  ) {
+    const captureGameState = getBestImmediateCapture(aftermathGameState);
+    const nextGameState = captureGameState ?? playMove(aftermathGameState, GO_PASS_MOVE);
+
+    if (!nextGameState) {
+      break;
+    }
+
+    aftermathGameState = nextGameState;
+  }
+
+  const deadMoves = [...passDeadMoves];
+
+  for (let move = 0; move < GO_BOARD_AREA; move += 1) {
+    if (
+      gameState.board[move] !== GO_EMPTY_COLOR &&
+      aftermathGameState.board[move] === GO_EMPTY_COLOR
+    ) {
+      deadMoves.push(move);
+    }
+  }
+
+  return [...new Set(deadMoves)];
+};
+
 const isGameOver = (gameState: GoGameState) =>
   gameState.consecutivePassCount >= GO_GAME_OVER_PASS_COUNT ||
   gameState.moveCount >= GO_MAXIMUM_MOVE_COUNT;
@@ -342,8 +594,10 @@ const isGameOver = (gameState: GoGameState) =>
 export {
   createGameState,
   encodeStudentFeatures,
+  getAutomaticallyDeadMoves,
   getAreaScore,
   getLegalMoves,
+  getPassAliveArea,
   isGameOver,
   playMove,
   removeDeadStones,
