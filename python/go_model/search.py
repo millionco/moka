@@ -41,6 +41,7 @@ from go_model.config import (
     SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY,
     SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_ROLLOUT_DEPTH,
+    SEARCH_SCORE_VALUE_WEIGHT,
     SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_RANK_MINIMUM_TOP_MOVE_VOTE_COUNT,
@@ -56,7 +57,7 @@ from go_model.config import (
     SEARCH_VALUE_WEIGHT,
 )
 from go_model.features import encode_moka_features
-from go_model.model import MokaNetwork
+from go_model.model import MokaGlobalScoreNetwork, MokaNetwork
 from go_model.symmetry import (
     aggregate_symmetry_policies,
     aggregate_symmetry_values,
@@ -110,7 +111,17 @@ class MokaEvaluator:
         symmetry_top_move_vote_policy_weight: float = (
             SEARCH_ROOT_SYMMETRY_TOP_MOVE_VOTE_POLICY_WEIGHT
         ),
+        score_value_weight: float = SEARCH_SCORE_VALUE_WEIGHT,
     ) -> None:
+        if not 0 <= score_value_weight <= 1:
+            raise ValueError("Score value weight must be between zero and one.")
+        if score_value_weight > 0 and not isinstance(
+            model,
+            MokaGlobalScoreNetwork,
+        ):
+            raise ValueError(
+                "Score value blending requires a global-score checkpoint."
+            )
         self.model = model
         self.use_symmetry_ensemble = use_symmetry_ensemble
         self.symmetry_rotation_count = symmetry_rotation_count
@@ -133,6 +144,7 @@ class MokaEvaluator:
         self.symmetry_top_move_vote_policy_weight = (
             symmetry_top_move_vote_policy_weight
         )
+        self.score_value_weight = score_value_weight
         self.evaluation_count = 0
         self.cache: dict[
             tuple[bytes, int, int, tuple[int, ...]],
@@ -162,6 +174,7 @@ class MokaEvaluator:
             self.symmetry_rank_policy_end_move_count,
             self.symmetry_rank_minimum_top_move_vote_count,
             self.symmetry_top_move_vote_policy_weight,
+            self.score_value_weight,
         )
 
     def get_symmetry_value_spread(self, game_state: GameState) -> float:
@@ -261,10 +274,21 @@ class MokaEvaluator:
             else:
                 features = np.stack(base_features)
 
-            policy_logits, values = self.model(mx.array(features, dtype=mx.float32))
-            mx.eval(policy_logits, values)
+            feature_values = mx.array(features, dtype=mx.float32)
+            if self.score_value_weight > 0:
+                policy_logits, values, scores = (
+                    self.model.get_search_outputs(feature_values)
+                )
+                mx.eval(policy_logits, values, scores)
+                value_array = (
+                    (1 - self.score_value_weight) * np.asarray(values)
+                    + self.score_value_weight * np.asarray(scores)
+                )
+            else:
+                policy_logits, values = self.model(feature_values)
+                mx.eval(policy_logits, values)
+                value_array = np.asarray(values)
             logits = np.asarray(policy_logits)
-            value_array = np.asarray(values)
             maximum_logits = np.max(logits, axis=1, keepdims=True)
             policies = np.exp(logits - maximum_logits)
             policies /= np.sum(policies, axis=1, keepdims=True)

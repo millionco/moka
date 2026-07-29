@@ -501,7 +501,10 @@ def optimize_policy(
                 distillation_weight,
             )
             loss, gradients = (
-                loss_and_grad(model.parameters(), *loss_arguments)
+                loss_and_grad(
+                    model.trainable_parameters(),
+                    *loss_arguments,
+                )
                 if quantized_model is not None
                 else loss_and_grad(model, *loss_arguments)
             )

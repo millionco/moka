@@ -37,6 +37,7 @@ from go_model.config import (
     VALUE_LOSS_WEIGHT,
 )
 from go_model.model import (
+    GatedGlobalNestedBottleneckBlock,
     GlobalNestedBottleneckBlock,
     MokaAttentionAuxiliaryNetwork,
     MokaAuxiliaryNetwork,
@@ -45,6 +46,7 @@ from go_model.model import (
     MokaQAuxiliaryNetwork,
     MokaSoftPolicyNetwork,
     checkpoint_uses_global_value_network,
+    checkpoint_uses_gated_global_residual_network,
     create_moka_network,
     get_checkpoint_global_residual_block_interval,
 )
@@ -434,6 +436,8 @@ def train(
     train_new_global_residual_adapters_only: bool,
     use_global_value_network: bool,
     train_global_value_adapter_only: bool,
+    use_gated_global_residual_network: bool,
+    train_global_gate_only: bool,
 ) -> None:
     checkpoint_global_residual_block_interval = (
         get_checkpoint_global_residual_block_interval(
@@ -442,6 +446,16 @@ def train(
         if initial_checkpoint_path is not None
         else 0
     )
+    if (
+        initial_checkpoint_path is not None
+        and checkpoint_uses_gated_global_residual_network(
+            str(initial_checkpoint_path)
+        )
+    ):
+        use_gated_global_residual_network = True
+        use_global_residual_network = True
+    if use_gated_global_residual_network:
+        use_global_residual_network = True
     if checkpoint_global_residual_block_interval > 0:
         use_global_residual_network = True
     if (
@@ -705,6 +719,8 @@ def train(
                         use_global_residual_network,
                         global_residual_block_interval,
                         use_global_value_network,
+                        False,
+                        use_gated_global_residual_network,
                     )
                 )
             )
@@ -741,6 +757,8 @@ def train(
             use_global_residual_network,
             global_residual_block_interval,
             use_global_value_network,
+            False,
+            use_gated_global_residual_network,
         )
         reference_model.load_weights(
             str(initial_checkpoint_path),
@@ -762,6 +780,7 @@ def train(
             train_global_residual_adapter_only,
             train_new_global_residual_adapters_only,
             train_global_value_adapter_only,
+            train_global_gate_only,
         ]
     )
     if selected_global_adapter_mode_count > 1:
@@ -775,6 +794,19 @@ def train(
         model.global_pooling_hidden.unfreeze()
         model.global_policy_output.unfreeze()
         model.global_value_output.unfreeze()
+    elif train_global_gate_only:
+        if not use_gated_global_residual_network:
+            raise ValueError(
+                "Global gate training requires a gated "
+                "global-residual network."
+            )
+        model.freeze()
+        for residual_block in model.residual_blocks:
+            if isinstance(
+                residual_block,
+                GatedGlobalNestedBottleneckBlock,
+            ):
+                residual_block.global_scale_output.unfreeze()
     elif train_global_residual_adapter_only:
         if not use_global_residual_network:
             raise ValueError(
@@ -867,6 +899,8 @@ def train(
             use_global_residual_network,
             global_residual_block_interval,
             use_global_value_network,
+            False,
+            use_gated_global_residual_network,
         )
         if use_int8_quantization_aware_training
         else None
@@ -1180,6 +1214,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
     )
     argument_parser.add_argument(
+        "--gated-global-residual",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--global-gate-only",
+        action="store_true",
+    )
+    argument_parser.add_argument(
         "--int8-quantization-aware",
         action="store_true",
     )
@@ -1251,6 +1293,8 @@ def main() -> None:
         arguments.new_global_residual_adapters_only,
         arguments.global_value,
         arguments.global_value_adapter_only,
+        arguments.gated_global_residual,
+        arguments.global_gate_only,
     )
 
 

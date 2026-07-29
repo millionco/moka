@@ -23,6 +23,7 @@ go-quantize = "go_model.quantization:main"
 go-reweight = "go_model.reweight:main"
 go-search-generate = "go_model.search_generate:main"
 go-search-collect = "go_model.search_collect:main"
+go-score = "go_model.score:main"
 go-train = "go_model.train:main"
 go-value = "go_model.value:main"
 

@@ -5217,3 +5217,77 @@ Three four-epoch, exact-QAT, adapter-only updates used learning rates 0.000001, 
 | Candidate |    7 |     2 |     5 |    0 |   71.8s |
 
 Direct action credit was cleaner but still overfit the small set of counterfactual states. The candidate and whole-trajectory family are rejected. The search-guided collector and exact-QAT optimizer remain for larger, independently replicated corpora; the promoted checkpoint, browser artifact, and Million website remain unchanged.
+
+### Frozen-parameter correction
+
+A later tensor audit found that the custom policy QAT closure had differentiated the complete parameter tree rather than `trainable_parameters()`. The two rejected candidates above therefore updated the full network even though their intended recipe was adapter-only. Production was never affected.
+
+The closure now follows the established trainer's partial-tree QAT path. Replaying the frozen whole-trajectory and counterfactual recipes changed exactly the intended 12 existing global-adapter tensors and no others. On 20 fresh games from opening offset 4,960,000:
+
+| Player                   | Wins | Black | White | Caps | Runtime |
+| :----------------------- | ---: | ----: | ----: | ---: | ------: |
+| Control                  |    6 |     3 |     3 |    0 |   77.0s |
+| Whole-trajectory adapter |    7 |     2 |     5 |    0 |   80.3s |
+| Counterfactual adapter   |    7 |     4 |     3 |    0 |   88.9s |
+
+The corrected candidates tied for the lead with opposite color splits, so neither advanced. An equal parameter blend was treated as a new hypothesis on opening offset 4,970,000. It exactly tied control at 10 wins, split 3 Black / 7 White, with zero caps; runtime was 78.2 versus 78.5 seconds. The blend is also rejected.
+
+## 2026-07-29 — Learned score-margin search signal
+
+### Hypothesis
+
+The value head predicts win probability, while the b18 teacher also supplies score lead. A 115-parameter spatial score head can preserve the deployed policy and value exactly while offering PUCT an independent margin estimate. This tests a learned alternative to the rejected rule-area blend.
+
+The research-only global-score network adds one 32-to-1 pointwise convolution and one 81-to-1 output. Browser export rejects the unsupported head explicitly. A dedicated trainer freezes every existing tensor and fits normalized score lead on the fresh 4,700,000 and 4,710,000 on-policy blocks, reserving 4,720,000 end-to-end.
+
+### Training and audit
+
+Learning rates 0.0003, 0.001, and 0.003 used 30 epochs and seeds 371–373. The 0.003 head was the unique validation-MAE winner at 0.1428 with 78.8% validation sign agreement. Its untouched-block MAE was 0.1866 with 77.0% sign agreement. Exact materialization retained every one of the incumbent's 105,353 parameters byte-for-byte; policy logits and values were bit-exact on the audit batch. Total parameters were 105,468.
+
+The first implementation attempted a custom QAT closure over `model.parameters()`, which bypassed frozen-parameter filtering. Exact tensor comparison caught the drift before arena evaluation. Those checkpoints were discarded, and the corrected head-only trainer produced the audited results above.
+
+### Arena
+
+The exact score checkpoint used blend weights 0, 0.10, 0.25, and 0.50 on 20 fresh games from opening offset 4,920,000:
+
+| Score weight | Wins | Black | White | Caps | Runtime |
+| -----------: | ---: | ----: | ----: | ---: | ------: |
+|         0.00 |   10 |     6 |     4 |    0 |   76.9s |
+|         0.10 |    7 |     4 |     3 |    0 |   77.3s |
+|         0.25 |    9 |     6 |     3 |    0 |   75.0s |
+|         0.50 |    7 |     4 |     3 |    0 |   80.1s |
+
+Every nonzero blend regressed. Accurate margin prediction is not a useful secondary PUCT value at this scale. The head is rejected without confirmation.
+
+## 2026-07-29 — Multiplicative global context
+
+### Architecture and training
+
+The promoted additive global adapters produced the last large replicated gain. A complementary squeeze-excitation-style gate reuses each adapter's eight-channel global hidden state to multiplicatively scale the 16 bottleneck channels before the second spatial convolution. Three zero-initialized outputs add only 432 parameters and exactly reproduce the incumbent before training.
+
+The trainer can freeze all existing tensors and update only the six new gate tensors under exact INT8-aware training. A smoke audit confirmed that every incumbent tensor stayed exact. Three candidates trained on fresh promoted-Moka blocks 4,700,000 and 4,710,000 for three epochs with policy preservation 0.25, batch size 256, and learning rates 0.00001, 0.00003, and 0.0001.
+
+On the untouched 4,720,000 test bucket:
+
+| Player    |   Loss | Top move | Value MAE |
+| :-------- | -----: | -------: | --------: |
+| Control   | 3.0335 |    35.3% |    0.4264 |
+| Gate 1e-5 | 3.0328 |    35.3% |    0.4264 |
+| Gate 3e-5 | 3.0322 |    35.3% |    0.4264 |
+| Gate 1e-4 | 3.0258 |    35.3% |    0.4257 |
+
+The 0.0001 gate was the unique frozen arbitration winner. Its exact checkpoint has 105,785 parameters.
+
+### Screen and confirmation
+
+On 20 fresh games from opening offset 4,930,000, control scored nine wins, split 4 Black / 5 White, while the gate scored 12, split 6 / 6. Both had zero caps.
+
+Two untouched 100-game blocks produced:
+
+| Opening offset | Control wins | Gate wins | Control Black / White | Gate Black / White | Control / gate caps | Control / gate runtime |
+| -------------: | -----------: | --------: | :-------------------- | :----------------- | ------------------: | ---------------------: |
+|      4,940,000 |           41 |        43 | 21 / 20               | 24 / 19            |               0 / 0 |        412.4s / 410.4s |
+|      4,950,000 |           40 |        36 | 20 / 20               | 19 / 17            |               0 / 0 |        385.2s / 400.0s |
+|      **Total** |       **81** |    **79** | **41 / 40**           | **43 / 36**        |           **0 / 0** |    **797.6s / 810.4s** |
+
+The first-block two-game gain reversed to a four-game loss. Aggregate performance regressed by two games, primarily as White, and runtime increased 1.6%. Multiplicative global context is rejected. The promoted checkpoint, browser artifact, and Million website remain unchanged.

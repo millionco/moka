@@ -46,6 +46,7 @@ from go_model.config import (
     SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
     SEARCH_ROLLOUT_DEPTH,
+    SEARCH_SCORE_VALUE_WEIGHT,
     SEARCH_ROOT_BRANCH_COUNT,
     SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT,
@@ -250,6 +251,7 @@ def run_arena(
     child_q_pseudo_count: float = SEARCH_CHILD_Q_PSEUDO_COUNT,
     search_value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
     search_area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
+    search_score_value_weight: float = SEARCH_SCORE_VALUE_WEIGHT,
     search_rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
     sequential_halving_candidate_count: int = (
         SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT
@@ -360,6 +362,7 @@ def run_arena(
         symmetry_geometric_policy_weight=(
             descendant_symmetry_geometric_policy_weight
         ),
+        score_value_weight=search_score_value_weight,
     )
     root_evaluator = (
         MokaEvaluator(
@@ -386,6 +389,7 @@ def run_arena(
             symmetry_top_move_vote_policy_weight=(
                 root_symmetry_top_move_vote_policy_weight
             ),
+            score_value_weight=search_score_value_weight,
         )
         if use_root_symmetry_ensemble
         else None
@@ -749,6 +753,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_AREA_VALUE_WEIGHT,
     )
     argument_parser.add_argument(
+        "--search-score-value-weight",
+        type=float,
+        default=SEARCH_SCORE_VALUE_WEIGHT,
+    )
+    argument_parser.add_argument(
         "--search-rollout-depth",
         type=int,
         default=SEARCH_ROLLOUT_DEPTH,
@@ -917,6 +926,7 @@ def main() -> None:
         arguments.search_child_q_pseudo_count,
         arguments.search_value_weight,
         arguments.search_area_value_weight,
+        arguments.search_score_value_weight,
         arguments.search_rollout_depth,
         arguments.sequential_halving_candidates,
         arguments.symmetry_ensemble,

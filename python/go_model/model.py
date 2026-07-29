@@ -116,6 +116,47 @@ class GlobalNestedBottleneckBlock(NestedBottleneckBlock):
         return nn.relu(inputs + self.expand_convolution(hidden_values))
 
 
+class GatedGlobalNestedBottleneckBlock(GlobalNestedBottleneckBlock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.global_scale_output = nn.Linear(
+            GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT,
+            NESTED_BOTTLENECK_CHANNEL_COUNT,
+        )
+        self.global_scale_output.weight = mx.zeros_like(
+            self.global_scale_output.weight
+        )
+        self.global_scale_output.bias = mx.zeros_like(
+            self.global_scale_output.bias
+        )
+
+    def __call__(self, inputs: mx.array) -> mx.array:
+        hidden_values = nn.relu(self.reduce_convolution(inputs))
+        hidden_values = nn.relu(
+            self.first_spatial_convolution(hidden_values)
+        )
+        global_values = mx.concatenate(
+            [
+                mx.mean(hidden_values, axis=(1, 2)),
+                mx.max(hidden_values, axis=(1, 2)),
+            ],
+            axis=1,
+        )
+        global_hidden = nn.relu(self.global_pooling_hidden(global_values))
+        global_bias = self.global_bias_output(
+            global_hidden
+        )[:, None, None, :]
+        global_scale = mx.tanh(
+            self.global_scale_output(global_hidden)
+        )[:, None, None, :]
+        hidden_values = nn.relu(
+            self.second_spatial_convolution(
+                hidden_values * (1 + global_scale) + global_bias
+            )
+        )
+        return nn.relu(inputs + self.expand_convolution(hidden_values))
+
+
 class WideBottleneckBlock(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -306,6 +347,22 @@ class MokaGlobalResidualNetwork(MokaNestedNetwork):
         ]
 
 
+class MokaGatedGlobalResidualNetwork(MokaGlobalResidualNetwork):
+    def __init__(
+        self,
+        global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+    ) -> None:
+        super().__init__(global_residual_block_interval)
+        self.residual_blocks = [
+            (
+                GatedGlobalNestedBottleneckBlock()
+                if (block_index + 1) % global_residual_block_interval == 0
+                else NestedBottleneckBlock()
+            )
+            for block_index in range(NESTED_RESIDUAL_BLOCK_COUNT)
+        ]
+
+
 class MokaGlobalValueNetwork(MokaGlobalResidualNetwork):
     def __init__(
         self,
@@ -351,6 +408,46 @@ class MokaGlobalValueNetwork(MokaGlobalResidualNetwork):
             self.value_output(value_hidden)
             + self.global_value_output(global_value_hidden)
         ).squeeze(-1)
+        return policy_logits, value
+
+
+class MokaGlobalScoreNetwork(MokaGlobalResidualNetwork):
+    def __init__(
+        self,
+        global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+    ) -> None:
+        super().__init__(global_residual_block_interval)
+        self.global_score_convolution = nn.Conv2d(
+            TRUNK_CHANNEL_COUNT,
+            1,
+            kernel_size=1,
+        )
+        self.global_score_output = nn.Linear(BOARD_AREA, 1)
+
+    def get_search_outputs(
+        self,
+        inputs: mx.array,
+    ) -> tuple[mx.array, mx.array, mx.array]:
+        trunk_values = self.get_trunk_values(inputs)
+        policy_values = nn.relu(self.policy_convolution(trunk_values))
+        policy_logits = self.policy_linear(
+            mx.flatten(policy_values, start_axis=1)
+        )
+        value_values = nn.relu(self.value_convolution(trunk_values))
+        value_hidden = nn.relu(
+            self.value_hidden(mx.flatten(value_values, start_axis=1))
+        )
+        value = mx.tanh(self.value_output(value_hidden)).squeeze(-1)
+        score_values = self.global_score_convolution(trunk_values)
+        score = mx.tanh(
+            self.global_score_output(
+                mx.flatten(score_values, start_axis=1),
+            )
+        ).squeeze(-1)
+        return policy_logits, value, score
+
+    def __call__(self, inputs: mx.array) -> tuple[mx.array, mx.array]:
+        policy_logits, value, _ = self.get_search_outputs(inputs)
         return policy_logits, value
 
 
@@ -627,7 +724,17 @@ def create_moka_network(
     use_global_residual_network: bool = False,
     global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
     use_global_value_network: bool = False,
+    use_global_score_network: bool = False,
+    use_gated_global_residual_network: bool = False,
 ) -> MokaNetwork:
+    if use_gated_global_residual_network:
+        return MokaGatedGlobalResidualNetwork(
+            global_residual_block_interval
+        )
+
+    if use_global_score_network:
+        return MokaGlobalScoreNetwork(global_residual_block_interval)
+
     if use_global_value_network:
         return MokaGlobalValueNetwork(global_residual_block_interval)
 
@@ -702,6 +809,21 @@ def checkpoint_uses_global_value_network(checkpoint_path: str) -> bool:
     return "global_value_hidden.weight" in parameters
 
 
+def checkpoint_uses_global_score_network(checkpoint_path: str) -> bool:
+    parameters = mx.load(checkpoint_path)
+    return "global_score_convolution.weight" in parameters
+
+
+def checkpoint_uses_gated_global_residual_network(
+    checkpoint_path: str,
+) -> bool:
+    parameters = mx.load(checkpoint_path)
+    return any(
+        parameter_name.endswith(".global_scale_output.weight")
+        for parameter_name in parameters
+    )
+
+
 def create_moka_network_for_checkpoint(
     checkpoint_path: str,
     use_nested_network: bool = False,
@@ -713,6 +835,8 @@ def create_moka_network_for_checkpoint(
     use_global_residual_network: bool = False,
     global_residual_block_interval: int | None = None,
     use_global_value_network: bool = False,
+    use_global_score_network: bool = False,
+    use_gated_global_residual_network: bool = False,
 ) -> MokaNetwork:
     checkpoint_global_residual_block_interval = (
         get_checkpoint_global_residual_block_interval(checkpoint_path)
@@ -739,5 +863,15 @@ def create_moka_network_for_checkpoint(
         (
             use_global_value_network
             or checkpoint_uses_global_value_network(checkpoint_path)
+        ),
+        (
+            use_global_score_network
+            or checkpoint_uses_global_score_network(checkpoint_path)
+        ),
+        (
+            use_gated_global_residual_network
+            or checkpoint_uses_gated_global_residual_network(
+                checkpoint_path
+            )
         ),
     )

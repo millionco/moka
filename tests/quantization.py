@@ -15,11 +15,15 @@ from go_model.config import (
 )
 from go_model.export import export_model
 from go_model.model import (
+    MokaGatedGlobalResidualNetwork,
     MokaGlobalResidualNetwork,
+    MokaGlobalScoreNetwork,
     MokaGlobalValueNetwork,
     MokaNestedNetwork,
     checkpoint_uses_global_residual_network,
+    checkpoint_uses_global_score_network,
     checkpoint_uses_global_value_network,
+    checkpoint_uses_gated_global_residual_network,
     checkpoint_uses_nested_network,
     create_moka_network_for_checkpoint,
     get_checkpoint_global_residual_block_interval,
@@ -274,6 +278,130 @@ class QuantizationTest(unittest.TestCase):
             ):
                 export_model(
                     global_value_checkpoint_path,
+                    Path(temporary_directory) / "export",
+                    8,
+                )
+
+    def test_global_score_checkpoint_preserves_deployed_outputs(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            checkpoint_path = (
+                Path(temporary_directory) / "source.safetensors"
+            )
+            global_score_checkpoint_path = (
+                Path(temporary_directory) / "global-score.safetensors"
+            )
+            source_model = MokaGlobalResidualNetwork()
+            source_model.save_weights(str(checkpoint_path))
+            global_score_model = MokaGlobalScoreNetwork()
+            global_score_model.load_weights(
+                str(checkpoint_path),
+                strict=False,
+            )
+            features = mx.random.normal(
+                (
+                    2,
+                    BOARD_SIZE,
+                    BOARD_SIZE,
+                    INPUT_PLANE_COUNT,
+                )
+            )
+            source_outputs = source_model(features)
+            global_score_outputs = global_score_model(features)
+            mx.eval(source_outputs, global_score_outputs)
+
+            for source_output, global_score_output in zip(
+                source_outputs,
+                global_score_outputs,
+                strict=True,
+            ):
+                np.testing.assert_array_equal(
+                    np.asarray(source_output),
+                    np.asarray(global_score_output),
+                )
+
+            global_score_model.save_weights(
+                str(global_score_checkpoint_path)
+            )
+            self.assertTrue(
+                checkpoint_uses_global_score_network(
+                    str(global_score_checkpoint_path)
+                )
+            )
+            self.assertIsInstance(
+                create_moka_network_for_checkpoint(
+                    str(global_score_checkpoint_path)
+                ),
+                MokaGlobalScoreNetwork,
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                "not supported by the browser runtime",
+            ):
+                export_model(
+                    global_score_checkpoint_path,
+                    Path(temporary_directory) / "export",
+                    8,
+                )
+
+    def test_gated_global_checkpoint_preserves_deployed_outputs(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            checkpoint_path = (
+                Path(temporary_directory) / "source.safetensors"
+            )
+            gated_checkpoint_path = (
+                Path(temporary_directory) / "gated.safetensors"
+            )
+            source_model = MokaGlobalResidualNetwork()
+            source_model.save_weights(str(checkpoint_path))
+            gated_model = MokaGatedGlobalResidualNetwork()
+            gated_model.load_weights(
+                str(checkpoint_path),
+                strict=False,
+            )
+            features = mx.random.normal(
+                (
+                    2,
+                    BOARD_SIZE,
+                    BOARD_SIZE,
+                    INPUT_PLANE_COUNT,
+                )
+            )
+            source_outputs = source_model(features)
+            gated_outputs = gated_model(features)
+            mx.eval(source_outputs, gated_outputs)
+
+            for source_output, gated_output in zip(
+                source_outputs,
+                gated_outputs,
+                strict=True,
+            ):
+                np.testing.assert_array_equal(
+                    np.asarray(source_output),
+                    np.asarray(gated_output),
+                )
+
+            gated_model.save_weights(str(gated_checkpoint_path))
+            self.assertTrue(
+                checkpoint_uses_gated_global_residual_network(
+                    str(gated_checkpoint_path)
+                )
+            )
+            self.assertIsInstance(
+                create_moka_network_for_checkpoint(
+                    str(gated_checkpoint_path)
+                ),
+                MokaGatedGlobalResidualNetwork,
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                "not supported by the browser runtime",
+            ):
+                export_model(
+                    gated_checkpoint_path,
                     Path(temporary_directory) / "export",
                     8,
                 )
