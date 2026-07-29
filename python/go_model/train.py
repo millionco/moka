@@ -17,6 +17,8 @@ from go_model.config import (
     LISTWISE_POLICY_RANK_COUNT,
     OWNERSHIP_LOSS_WEIGHT,
     PPO_ILLEGAL_MOVE_LOGIT,
+    Q_RANK_MINIMUM_ADVANTAGE,
+    Q_RANK_MINIMUM_VISIT_COUNT,
     Q_VALUE_LOSS_WEIGHT,
     REVERSE_KL_EPSILON,
     SCORE_LOSS_WEIGHT,
@@ -93,6 +95,55 @@ def calculate_listwise_policy_loss(
     return mx.mean(sample_losses * normalized_weights) / LISTWISE_POLICY_RANK_COUNT
 
 
+def calculate_q_rank_policy_loss(
+    policy_logits: mx.array,
+    policy_targets: mx.array,
+    q_value_targets: mx.array,
+    q_value_weights: mx.array,
+    sample_weights: mx.array,
+) -> mx.array:
+    teacher_moves = mx.argmax(policy_targets, axis=1)
+    teacher_q_values = mx.take_along_axis(
+        q_value_targets,
+        teacher_moves[:, None],
+        axis=1,
+    ).squeeze(1)
+    teacher_q_weights = mx.take_along_axis(
+        q_value_weights,
+        teacher_moves[:, None],
+        axis=1,
+    ).squeeze(1)
+    teacher_logits = mx.take_along_axis(
+        policy_logits,
+        teacher_moves[:, None],
+        axis=1,
+    ).squeeze(1)
+    advantages = teacher_q_values[:, None] - q_value_targets
+    pair_weights = mx.where(
+        (teacher_q_weights[:, None] >= Q_RANK_MINIMUM_VISIT_COUNT)
+        & (q_value_weights >= Q_RANK_MINIMUM_VISIT_COUNT)
+        & (advantages >= Q_RANK_MINIMUM_ADVANTAGE),
+        advantages,
+        0,
+    )
+    pair_weight_sums = mx.sum(pair_weights, axis=1)
+    pair_losses = mx.logaddexp(
+        mx.zeros_like(policy_logits),
+        policy_logits - teacher_logits[:, None],
+    )
+    sample_losses = mx.sum(pair_losses * pair_weights, axis=1) / mx.maximum(
+        pair_weight_sums,
+        REVERSE_KL_EPSILON,
+    )
+    active_samples = (pair_weight_sums > 0).astype(mx.float32)
+    normalized_weights = normalize_sample_weights(sample_weights)
+    active_weights = active_samples * normalized_weights
+    return mx.sum(sample_losses * active_weights) / mx.maximum(
+        mx.sum(active_weights),
+        REVERSE_KL_EPSILON,
+    )
+
+
 def calculate_loss(
     model: MokaNetwork,
     features: mx.array,
@@ -114,11 +165,13 @@ def calculate_loss(
     use_q_auxiliary: bool,
     use_attention_auxiliary: bool,
     listwise_policy_weight: float,
+    q_rank_policy_weight: float,
     reference_policy_logits: mx.array,
     policy_preservation_weight: float,
 ) -> tuple[
     mx.array,
     tuple[
+        mx.array,
         mx.array,
         mx.array,
         mx.array,
@@ -178,6 +231,13 @@ def calculate_loss(
     listwise_policy_loss = calculate_listwise_policy_loss(
         policy_logits,
         policy_targets,
+        sample_weights,
+    )
+    q_rank_policy_loss = calculate_q_rank_policy_loss(
+        policy_logits,
+        policy_targets,
+        q_value_targets,
+        q_value_weights,
         sample_weights,
     )
     policy_preservation_loss = mx.mean(
@@ -243,6 +303,7 @@ def calculate_loss(
         + Q_VALUE_LOSS_WEIGHT * q_value_loss
         + ATTENTION_TRANSFER_LOSS_WEIGHT * attention_loss
         + listwise_policy_weight * listwise_policy_loss
+        + q_rank_policy_weight * q_rank_policy_loss
         + policy_preservation_weight * policy_preservation_loss,
         (
             policy_loss,
@@ -253,6 +314,7 @@ def calculate_loss(
             attention_loss,
             soft_policy_loss,
             listwise_policy_loss,
+            q_rank_policy_loss,
         ),
     )
 
@@ -309,6 +371,7 @@ def evaluate(
             False,
             False,
             0,
+            0,
             mx.zeros_like(policy_batch),
             0,
         )
@@ -356,6 +419,7 @@ def train(
     use_q_auxiliary: bool,
     use_attention_auxiliary: bool,
     listwise_policy_weight: float,
+    q_rank_policy_weight: float,
     auxiliary_checkpoint_path: Path | None,
     freeze_trunk: bool,
     freeze_policy_convolution: bool,
@@ -887,6 +951,7 @@ def train(
                 use_q_auxiliary,
                 use_attention_auxiliary,
                 listwise_policy_weight,
+                q_rank_policy_weight,
                 reference_policy_logits,
                 policy_preservation_weight,
             )
@@ -1034,6 +1099,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     )
     argument_parser.add_argument("--auxiliary-checkpoint", type=Path)
     argument_parser.add_argument("--listwise-weight", type=float, default=0)
+    argument_parser.add_argument("--q-rank-weight", type=float, default=0)
     argument_parser.add_argument(
         "--ownership-weight",
         type=float,
@@ -1086,6 +1152,7 @@ def main() -> None:
         arguments.q_auxiliary,
         arguments.attention_transfer,
         arguments.listwise_weight,
+        arguments.q_rank_weight,
         arguments.auxiliary_checkpoint,
         arguments.freeze_trunk,
         arguments.freeze_policy_convolution,

@@ -20,6 +20,7 @@ from go_model.reweight import (
 )
 from go_model.train import (
     calculate_listwise_policy_loss,
+    calculate_q_rank_policy_loss,
     normalize_sample_weights,
     normalize_score_targets,
 )
@@ -180,6 +181,42 @@ class GroupRelativePolicyOptimizationTests(unittest.TestCase):
         )
 
         self.assertLess(float(ranked_loss.item()), float(reversed_loss.item()))
+
+    def test_q_rank_loss_prefers_materially_better_teacher_move(
+        self,
+    ) -> None:
+        policy_targets = mx.array([[0.6, 0.3, 0.1]])
+        q_values = mx.array([[0.8, 0.7, -0.2]])
+        q_weights = mx.array([[12, 8, 4]])
+        ranked_loss = calculate_q_rank_policy_loss(
+            mx.array([[3, 2, 0]]),
+            policy_targets,
+            q_values,
+            q_weights,
+            mx.ones(1),
+        )
+        reversed_loss = calculate_q_rank_policy_loss(
+            mx.array([[0, 2, 3]]),
+            policy_targets,
+            q_values,
+            q_weights,
+            mx.ones(1),
+        )
+
+        self.assertLess(float(ranked_loss.item()), float(reversed_loss.item()))
+
+    def test_q_rank_loss_ignores_unvisited_and_equivalent_moves(
+        self,
+    ) -> None:
+        loss = calculate_q_rank_policy_loss(
+            mx.array([[0, 10, 10]]),
+            mx.array([[0.6, 0.3, 0.1]]),
+            mx.array([[0.8, 0.79, -0.2]]),
+            mx.array([[12, 8, 1]]),
+            mx.ones(1),
+        )
+
+        self.assertEqual(float(loss.item()), 0)
 
     def test_counterfactual_weights_focus_positive_regret(self) -> None:
         policies = np.asarray(

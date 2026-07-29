@@ -5026,3 +5026,38 @@ Value weight 1.50 was the unique screen winner. Its two frozen confirmation bloc
 |      **Total** |     **92** |     **93** | **56 / 36**           | **58 / 35**             |                **0 / 0** |         **909.6s / 907.7s** |
 
 The four-game first-block gain reversed to a three-game loss. A one-game aggregate edge with opposite block directions is not evidence of stronger play. Value weight 1.50 is rejected; 1.25 remains accepted. The promoted global-residual model and browser artifact remain unchanged.
+
+## 2026-07-28 — Child-Q policy ranking
+
+### Hypothesis
+
+The previous direct-teacher updates repeatedly lowered average policy loss without improving play. Dense cross-entropy treats every probability error as relevant, while MCTS is especially sensitive to whether materially worse actions outrank the teacher's preferred action. A targeted pairwise objective can protect this decision structure without adding an inference head or changing browser cost.
+
+For each position, the objective takes b18's most-visited move and compares it only with child actions that:
+
+- have at least two b18 visits;
+- are at least 0.05 root-value worse than the preferred move.
+
+The loss is an advantage-weighted logistic ranking loss over the existing policy logits. It activates on 22.5%, 25.9%, and 28.0% of the offset-3,000,000, 3,100,000, and 3,500,000 corpora, respectively, with about two material comparisons per active position. KataGo values are used only during offline training.
+
+### Training and offline gate
+
+Three global-residual adapter-only candidates started from the promoted checkpoint. They used the same 5,167 training rows, three epochs, learning rate 0.00001, seed 320, exact INT8 preservation weight 0.25, and ranking weights 0.05, 0.10, and 0.20.
+
+| Player      | b18 3,000,000 loss / Q-rank | b18 3,100,000 loss / Q-rank | b18 3,500,000 loss / Q-rank | Consensus top move |
+| :---------- | --------------------------: | --------------------------: | --------------------------: | -----------------: |
+| Control     |             2.8980 / 0.7545 |             2.7451 / 0.8797 |             2.9435 / 0.9381 |              75.6% |
+| Q-rank 0.05 |             2.8830 / 0.7465 |             2.7331 / 0.8703 |             2.9233 / 0.9192 |              75.1% |
+| Q-rank 0.10 |             2.8831 / 0.7465 |             2.7329 / 0.8700 |             2.9232 / 0.9190 |              75.1% |
+| Q-rank 0.20 |             2.8831 / 0.7463 |             2.7327 / 0.8694 |             2.9232 / 0.9190 |              75.1% |
+
+All candidates also lowered standard b18 loss on the independent 128- and 256-visit test splits. The fixed 20-game screen used opening offset 4,560,000:
+
+| Player      | Wins | Black | White | Caps |
+| :---------- | ---: | ----: | ----: | ---: |
+| Control     |    8 |     4 |     4 |    0 |
+| Q-rank 0.05 |   10 |     6 |     4 |    0 |
+| Q-rank 0.10 |    9 |     6 |     3 |    0 |
+| Q-rank 0.20 |   10 |     6 |     4 |    0 |
+
+Weights 0.05 and 0.20 tied exactly for the lead, including color split and cap count. Selecting one after observing the tie would add bias, so neither advances. The child-Q objective remains available for reproducible future experiments, but the checkpoint and browser artifact remain unchanged.
