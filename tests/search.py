@@ -20,6 +20,7 @@ from go_model.search import (
     resolve_first_play_urgency_reduction,
     resolve_q_value_normalization_weight,
     resolve_root_policy_temperature,
+    resolve_search_exploration,
     run_search_simulations,
     select_child,
 )
@@ -83,6 +84,7 @@ class SearchTest(unittest.TestCase):
 
         self.assertEqual(arguments.simulations, 64)
         self.assertEqual(arguments.search_exploration, 2.0)
+        self.assertIsNone(arguments.descendant_search_exploration)
         self.assertEqual(arguments.search_fpu_reduction, 0.5)
         self.assertEqual(arguments.resignation_area_margin, 60.0)
         self.assertTrue(arguments.symmetry_ensemble)
@@ -105,9 +107,15 @@ class SearchTest(unittest.TestCase):
                 "0.5",
                 "--descendant-policy-temperature",
                 "0.75",
+                "--descendant-search-exploration",
+                "1.5",
             ],
         )
         self.assertFalse(control_arguments.symmetry_ensemble)
+        self.assertEqual(
+            control_arguments.descendant_search_exploration,
+            1.5,
+        )
         self.assertEqual(
             control_arguments.descendant_policy_temperature,
             0.75,
@@ -136,6 +144,11 @@ class SearchTest(unittest.TestCase):
 
         self.assertGreater(sharpened_policy[0], default_policy[0])
         self.assertAlmostEqual(float(np.sum(sharpened_policy)), 1, places=6)
+
+    def test_descendant_exploration_inherits_or_overrides_root(self) -> None:
+        self.assertEqual(resolve_search_exploration(2, None, False), 2)
+        self.assertEqual(resolve_search_exploration(2, 1.5, True), 2)
+        self.assertEqual(resolve_search_exploration(2, 1.5, False), 1.5)
 
     def test_resignation_requires_hopeless_selected_pass(
         self,

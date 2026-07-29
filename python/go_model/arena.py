@@ -26,6 +26,7 @@ from go_model.config import (
     SEARCH_AREA_VALUE_WEIGHT,
     SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
     SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    SEARCH_DESCENDANT_PUCT_EXPLORATION,
     SEARCH_DESCENDANT_POLICY_TEMPERATURE,
     SEARCH_DESCENDANT_SYMMETRY_ENSEMBLE,
     SEARCH_DESCENDANT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
@@ -238,6 +239,9 @@ def run_arena(
     rollout_candidate_count: int,
     rollout_count: int,
     search_exploration: float = SEARCH_PUCT_EXPLORATION,
+    descendant_search_exploration: float | None = (
+        SEARCH_DESCENDANT_PUCT_EXPLORATION
+    ),
     search_value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
     search_area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
     search_rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
@@ -395,6 +399,7 @@ def run_arena(
                     evaluator=evaluator,
                     candidate_count=sequential_halving_candidate_count,
                     exploration=search_exploration,
+                    descendant_exploration=descendant_search_exploration,
                     value_weight=search_value_weight,
                     area_value_weight=search_area_value_weight,
                     rollout_depth=search_rollout_depth,
@@ -438,6 +443,7 @@ def run_arena(
                 else MokaSearchSession(
                     evaluator=evaluator,
                     exploration=search_exploration,
+                    descendant_exploration=descendant_search_exploration,
                     value_weight=search_value_weight,
                     area_value_weight=search_area_value_weight,
                     rollout_depth=search_rollout_depth,
@@ -642,6 +648,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_PUCT_EXPLORATION,
     )
     argument_parser.add_argument(
+        "--descendant-search-exploration",
+        type=float,
+        default=SEARCH_DESCENDANT_PUCT_EXPLORATION,
+    )
+    argument_parser.add_argument(
         "--search-value-weight",
         type=float,
         default=SEARCH_PUCT_VALUE_WEIGHT,
@@ -843,6 +854,7 @@ def main() -> None:
         arguments.rollout_candidates,
         arguments.rollouts,
         arguments.search_exploration,
+        arguments.descendant_search_exploration,
         arguments.search_value_weight,
         arguments.search_area_value_weight,
         arguments.search_rollout_depth,

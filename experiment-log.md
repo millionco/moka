@@ -4384,3 +4384,49 @@ The broad screen had a clear interior peak, so one bounded local refinement test
 Temperature 0.85 advanced as the unique local leader. On 100 untouched paired games from opening offset 3,980,000, accepted temperature 1.0 won 44 games, split 22 Black and 22 White, with zero caps in 267.6 seconds. Temperature 0.85 won 41, split 19 Black and 22 White, with zero caps in 266.9 seconds.
 
 Both sharpened candidates failed independent confirmation. Descendant temperature 1.0 remains accepted. The independent research control remains available for reproducibility. The checkpoint, browser artifact, search defaults, and Million website remain unchanged.
+
+## 2026-07-28 — Full-symmetry descendant exploration
+
+### Hypothesis
+
+The earlier root/descendant exploration split was rejected when real roots used eight symmetries but descendants used one canonical view. Full descendant symmetry and FPU reduction 0.5 directly changed descendant prior reliability and allocation. The split was therefore re-audited under the accepted topology.
+
+An explicit descendant coefficient overrides exploration only below the real root. Its default inherits root exploration 2.0. Ordinary and sequential-halving paths share the same resolver. Default inheritance and explicit descendant 2.0 reproduced identical moves, passes, outcomes, and runtime.
+
+### Broad screen
+
+The prior experiment's coefficient grid was reused on 20 fresh games from opening offset 4,000,000:
+
+| Descendant exploration | Wins | Black | White | Caps | Runtime |
+| ---------------------: | ---: | ----: | ----: | ---: | ------: |
+|                  0.750 |    9 |     5 |     4 |    0 |   47.8s |
+|                  1.250 |   10 |     5 |     5 |    0 |   54.1s |
+|                  1.500 |    9 |     4 |     5 |    0 |   54.5s |
+|                  2.000 |    9 |     3 |     6 |    0 |   54.4s |
+|                  2.500 |    7 |     2 |     5 |    0 |   56.5s |
+
+Coefficient 1.25 advanced as the unique screen leader. On 100 untouched paired games from opening offset 4,010,000, accepted descendant exploration 2.0 won 43 games, split 22 Black and 21 White, with zero caps in 280.4 seconds. Candidate 1.25 also won 43, split 25 Black and 18 White, with zero caps in 271.6 seconds. It failed to confirm the screen gain and was rejected.
+
+### Local refinement
+
+One bounded local refinement tested the neighborhood around 1.25 on 20 fresh games from opening offset 4,020,000:
+
+| Descendant exploration | Wins | Black | White | Caps | Runtime |
+| ---------------------: | ---: | ----: | ----: | ---: | ------: |
+|                  1.000 |   12 |     6 |     6 |    0 |   52.5s |
+|                  1.125 |   10 |     4 |     6 |    0 |   54.7s |
+|                  1.250 |    8 |     4 |     4 |    0 |   52.6s |
+|                  1.375 |    9 |     4 |     5 |    0 |   54.8s |
+|                  2.000 |   10 |     6 |     4 |    0 |   53.4s |
+
+Coefficient 1.0 advanced as the unique local leader. Two untouched 100-game paired blocks produced:
+
+| Opening offset | Control wins | Candidate wins | Control Black / White | Candidate Black / White | Control / candidate caps | Control / candidate runtime |
+| -------------: | -----------: | -------------: | :-------------------- | :---------------------- | -----------------------: | --------------------------: |
+|      4,030,000 |           42 |             51 | 22 / 20               | 24 / 27                 |                    0 / 0 |             282.5s / 274.0s |
+|      4,040,000 |           44 |             34 | 22 / 22               | 17 / 17                 |                    0 / 0 |             279.0s / 262.7s |
+|      **Total** |       **86** |         **85** | **44 / 42**           | **41 / 44**             |                **0 / 0** |         **561.5s / 536.7s** |
+
+The first-block nine-game gain reversed by ten games in the second block. The candidate lost one game in aggregate despite ending games sooner. Descendant exploration 1.0 is rejected.
+
+Exploration 2.0 remains accepted at root and descendants. The independent research control remains available for reproducibility. The checkpoint, browser artifact, search defaults, and Million website remain unchanged.
