@@ -29,6 +29,7 @@ from go_model.config import (
 )
 from go_model.model import (
     MokaNetwork,
+    checkpoint_uses_global_value_network,
     create_moka_network_for_checkpoint,
     get_checkpoint_global_residual_block_interval,
 )
@@ -174,6 +175,11 @@ def export_model(
     use_nested_network: bool = False,
     use_global_residual_network: bool = False,
 ) -> tuple[Path, Path]:
+    if checkpoint_uses_global_value_network(str(checkpoint_path)):
+        raise ValueError(
+            "Global-value checkpoints are not supported by the browser "
+            "runtime."
+        )
     checkpoint_global_residual_block_interval = (
         get_checkpoint_global_residual_block_interval(
             str(checkpoint_path)

@@ -44,6 +44,7 @@ from go_model.model import (
     MokaNetwork,
     MokaQAuxiliaryNetwork,
     MokaSoftPolicyNetwork,
+    checkpoint_uses_global_value_network,
     create_moka_network,
     get_checkpoint_global_residual_block_interval,
 )
@@ -431,6 +432,8 @@ def train(
     global_residual_block_interval: int | None,
     train_global_residual_adapter_only: bool,
     train_new_global_residual_adapters_only: bool,
+    use_global_value_network: bool,
+    train_global_value_adapter_only: bool,
 ) -> None:
     checkpoint_global_residual_block_interval = (
         get_checkpoint_global_residual_block_interval(
@@ -440,6 +443,14 @@ def train(
         else 0
     )
     if checkpoint_global_residual_block_interval > 0:
+        use_global_residual_network = True
+    if (
+        initial_checkpoint_path is not None
+        and checkpoint_uses_global_value_network(
+            str(initial_checkpoint_path)
+        )
+    ):
+        use_global_value_network = True
         use_global_residual_network = True
     global_residual_block_interval = (
         global_residual_block_interval
@@ -693,6 +704,7 @@ def train(
                         use_global_pool_network,
                         use_global_residual_network,
                         global_residual_block_interval,
+                        use_global_value_network,
                     )
                 )
             )
@@ -710,6 +722,7 @@ def train(
                 and not use_attention_auxiliary
                 and not use_global_pool_network
                 and not use_global_residual_network
+                and not use_global_value_network
             ),
         )
     reference_model = None
@@ -727,12 +740,14 @@ def train(
             use_global_pool_network,
             use_global_residual_network,
             global_residual_block_interval,
+            use_global_value_network,
         )
         reference_model.load_weights(
             str(initial_checkpoint_path),
             strict=(
                 not use_global_pool_network
                 and not use_global_residual_network
+                and not use_global_value_network
             ),
         )
         if use_int8_quantization_aware_training:
@@ -746,6 +761,7 @@ def train(
             train_global_adapter_only,
             train_global_residual_adapter_only,
             train_new_global_residual_adapters_only,
+            train_global_value_adapter_only,
         ]
     )
     if selected_global_adapter_mode_count > 1:
@@ -800,6 +816,15 @@ def train(
             ):
                 residual_block.global_pooling_hidden.unfreeze()
                 residual_block.global_bias_output.unfreeze()
+    elif train_global_value_adapter_only:
+        if not use_global_value_network:
+            raise ValueError(
+                "Global value adapter training requires the "
+                "global-value network."
+            )
+        model.freeze()
+        model.global_value_hidden.unfreeze()
+        model.global_value_output.unfreeze()
     elif freeze_trunk:
         if (
             soft_policy_loss_weight > 0
@@ -841,6 +866,7 @@ def train(
             use_global_pool_network,
             use_global_residual_network,
             global_residual_block_interval,
+            use_global_value_network,
         )
         if use_int8_quantization_aware_training
         else None
@@ -1148,6 +1174,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--new-global-residual-adapters-only",
         action="store_true",
     )
+    argument_parser.add_argument("--global-value", action="store_true")
+    argument_parser.add_argument(
+        "--global-value-adapter-only",
+        action="store_true",
+    )
     argument_parser.add_argument(
         "--int8-quantization-aware",
         action="store_true",
@@ -1218,6 +1249,8 @@ def main() -> None:
         arguments.global_residual_interval,
         arguments.global_residual_adapter_only,
         arguments.new_global_residual_adapters_only,
+        arguments.global_value,
+        arguments.global_value_adapter_only,
     )
 
 

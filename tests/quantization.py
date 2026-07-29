@@ -16,8 +16,10 @@ from go_model.config import (
 from go_model.export import export_model
 from go_model.model import (
     MokaGlobalResidualNetwork,
+    MokaGlobalValueNetwork,
     MokaNestedNetwork,
     checkpoint_uses_global_residual_network,
+    checkpoint_uses_global_value_network,
     checkpoint_uses_nested_network,
     create_moka_network_for_checkpoint,
     get_checkpoint_global_residual_block_interval,
@@ -212,6 +214,69 @@ class QuantizationTest(unittest.TestCase):
                 "residual.1.global.hidden.weight",
                 manifest["tensors"],
             )
+
+    def test_global_value_initialization_preserves_deployed_outputs(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            checkpoint_path = (
+                Path(temporary_directory) / "source.safetensors"
+            )
+            global_value_checkpoint_path = (
+                Path(temporary_directory) / "global-value.safetensors"
+            )
+            source_model = MokaGlobalResidualNetwork()
+            source_model.save_weights(str(checkpoint_path))
+            global_value_model = MokaGlobalValueNetwork()
+            global_value_model.load_weights(
+                str(checkpoint_path),
+                strict=False,
+            )
+            features = mx.random.normal(
+                (
+                    2,
+                    BOARD_SIZE,
+                    BOARD_SIZE,
+                    INPUT_PLANE_COUNT,
+                )
+            )
+            source_outputs = source_model(features)
+            global_value_outputs = global_value_model(features)
+            mx.eval(source_outputs, global_value_outputs)
+
+            for source_output, global_value_output in zip(
+                source_outputs,
+                global_value_outputs,
+                strict=True,
+            ):
+                np.testing.assert_array_equal(
+                    np.asarray(source_output),
+                    np.asarray(global_value_output),
+                )
+
+            global_value_model.save_weights(
+                str(global_value_checkpoint_path)
+            )
+            self.assertTrue(
+                checkpoint_uses_global_value_network(
+                    str(global_value_checkpoint_path)
+                )
+            )
+            self.assertIsInstance(
+                create_moka_network_for_checkpoint(
+                    str(global_value_checkpoint_path)
+                ),
+                MokaGlobalValueNetwork,
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                "not supported by the browser runtime",
+            ):
+                export_model(
+                    global_value_checkpoint_path,
+                    Path(temporary_directory) / "export",
+                    8,
+                )
 
     def test_materialized_checkpoint_matches_fake_quantized_parameters(
         self,

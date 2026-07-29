@@ -8,6 +8,7 @@ from go_model.config import (
     GLOBAL_POOL_RESIDUAL_BLOCK_COUNT,
     GLOBAL_RESIDUAL_BLOCK_INTERVAL,
     GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT,
+    GLOBAL_VALUE_HIDDEN_CHANNEL_COUNT,
     INPUT_PLANE_COUNT,
     NESTED_BOTTLENECK_CHANNEL_COUNT,
     NESTED_RESIDUAL_BLOCK_COUNT,
@@ -174,12 +175,16 @@ class MokaNetwork(nn.Module):
         self.value_hidden = nn.Linear(VALUE_CHANNEL_COUNT * 81, SCORE_HIDDEN_CHANNEL_COUNT)
         self.value_output = nn.Linear(SCORE_HIDDEN_CHANNEL_COUNT, 1)
 
-    def __call__(self, inputs: mx.array) -> tuple[mx.array, mx.array]:
+    def get_trunk_values(self, inputs: mx.array) -> mx.array:
         trunk_values = nn.relu(self.stem(inputs))
 
         for residual_block in self.residual_blocks:
             trunk_values = residual_block(trunk_values)
 
+        return trunk_values
+
+    def __call__(self, inputs: mx.array) -> tuple[mx.array, mx.array]:
+        trunk_values = self.get_trunk_values(inputs)
         policy_values = nn.relu(self.policy_convolution(trunk_values))
         policy_logits = self.policy_linear(mx.flatten(policy_values, start_axis=1))
         value_values = nn.relu(self.value_convolution(trunk_values))
@@ -299,6 +304,54 @@ class MokaGlobalResidualNetwork(MokaNestedNetwork):
             )
             for block_index in range(NESTED_RESIDUAL_BLOCK_COUNT)
         ]
+
+
+class MokaGlobalValueNetwork(MokaGlobalResidualNetwork):
+    def __init__(
+        self,
+        global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+    ) -> None:
+        super().__init__(global_residual_block_interval)
+        self.global_value_hidden = nn.Linear(
+            TRUNK_CHANNEL_COUNT * 2,
+            GLOBAL_VALUE_HIDDEN_CHANNEL_COUNT,
+        )
+        self.global_value_output = nn.Linear(
+            GLOBAL_VALUE_HIDDEN_CHANNEL_COUNT,
+            1,
+        )
+        self.global_value_output.weight = mx.zeros_like(
+            self.global_value_output.weight
+        )
+        self.global_value_output.bias = mx.zeros_like(
+            self.global_value_output.bias
+        )
+
+    def __call__(self, inputs: mx.array) -> tuple[mx.array, mx.array]:
+        trunk_values = self.get_trunk_values(inputs)
+        policy_values = nn.relu(self.policy_convolution(trunk_values))
+        policy_logits = self.policy_linear(
+            mx.flatten(policy_values, start_axis=1)
+        )
+        value_values = nn.relu(self.value_convolution(trunk_values))
+        value_hidden = nn.relu(
+            self.value_hidden(mx.flatten(value_values, start_axis=1))
+        )
+        global_values = mx.concatenate(
+            [
+                mx.mean(trunk_values, axis=(1, 2)),
+                mx.max(trunk_values, axis=(1, 2)),
+            ],
+            axis=1,
+        )
+        global_value_hidden = nn.relu(
+            self.global_value_hidden(global_values)
+        )
+        value = mx.tanh(
+            self.value_output(value_hidden)
+            + self.global_value_output(global_value_hidden)
+        ).squeeze(-1)
+        return policy_logits, value
 
 
 class MokaSoftPolicyNetwork(MokaNestedNetwork):
@@ -573,7 +626,11 @@ def create_moka_network(
     use_global_pool_network: bool = False,
     use_global_residual_network: bool = False,
     global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+    use_global_value_network: bool = False,
 ) -> MokaNetwork:
+    if use_global_value_network:
+        return MokaGlobalValueNetwork(global_residual_block_interval)
+
     if use_global_residual_network:
         return MokaGlobalResidualNetwork(global_residual_block_interval)
 
@@ -640,6 +697,11 @@ def checkpoint_uses_nested_network(checkpoint_path: str) -> bool:
     )
 
 
+def checkpoint_uses_global_value_network(checkpoint_path: str) -> bool:
+    parameters = mx.load(checkpoint_path)
+    return "global_value_hidden.weight" in parameters
+
+
 def create_moka_network_for_checkpoint(
     checkpoint_path: str,
     use_nested_network: bool = False,
@@ -650,6 +712,7 @@ def create_moka_network_for_checkpoint(
     use_global_pool_network: bool = False,
     use_global_residual_network: bool = False,
     global_residual_block_interval: int | None = None,
+    use_global_value_network: bool = False,
 ) -> MokaNetwork:
     checkpoint_global_residual_block_interval = (
         get_checkpoint_global_residual_block_interval(checkpoint_path)
@@ -672,5 +735,9 @@ def create_moka_network_for_checkpoint(
             global_residual_block_interval
             or checkpoint_global_residual_block_interval
             or GLOBAL_RESIDUAL_BLOCK_INTERVAL
+        ),
+        (
+            use_global_value_network
+            or checkpoint_uses_global_value_network(checkpoint_path)
         ),
     )

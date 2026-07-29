@@ -5146,3 +5146,38 @@ The two-block 0.00003 candidate was the unique lowest-loss checkpoint on the pre
 | Candidate |   12 |     6 |     6 |    0 |   83.0s |
 
 The candidate tied every outcome aggregate and did not advance. Fresh current-player labels remain valuable data, but this replay schedule is rejected. The promoted checkpoint and browser artifact remain unchanged.
+
+## 2026-07-28 — Policy-identical global value calibration
+
+### Hypothesis
+
+Direct teacher updates can improve pointwise metrics while damaging the policy prior MCTS already uses successfully. A value-only adapter can isolate the other search signal. The experimental network pools the final trunk's spatial means and maxima, projects them through eight hidden channels, and adds one scalar correction before the existing value `tanh`.
+
+The output layer is zero-initialized, so loading the promoted checkpoint produces bit-identical policy logits and values. The adapter adds 529 parameters and has no path into the policy head.
+
+### Training
+
+Three exact-QAT candidates trained only the new value tensors on the three established b18 corpora and all three fresh promoted-Moka corpora. Each used three epochs, batch size 256, seed 350, and a learning rate of 0.0001, 0.0003, or 0.001. Exact materialization preserved policy logits bit-for-bit on every inspected position.
+
+The two conservative rates improved value error on six of eight held-out corpora. The 0.001 candidate regressed the independent 256-visit set and was rejected offline. Representative value errors were:
+
+| Corpus                     | Control | Value 1e-4 | Value 3e-4 | Value 1e-3 |
+| :------------------------- | ------: | ---------: | ---------: | ---------: |
+| Fresh offset 4,700,000     |  0.3872 |     0.3916 |     0.3972 |     0.4166 |
+| Fresh offset 4,710,000     |  0.3821 |     0.3710 |     0.3604 |     0.3552 |
+| Fresh offset 4,720,000     |  0.4264 |     0.4259 |     0.4256 |     0.4223 |
+| b18 offset 3,000,000       |  0.5483 |     0.5440 |     0.5396 |     0.5283 |
+| b18 offset 3,500,000       |  0.6050 |     0.6036 |     0.6012 |     0.5748 |
+| Independent b18 256 visits |  0.5238 |     0.5223 |     0.5220 |     0.5338 |
+
+### Arena
+
+The two conservative candidates used 20 paired games from opening offset 4,810,000:
+
+| Player     | Wins | Black | White | Caps | Runtime |
+| :--------- | ---: | ----: | ----: | ---: | ------: |
+| Control    |    9 |     3 |     6 |    0 |   90.9s |
+| Value 1e-4 |    9 |     4 |     5 |    0 |   92.0s |
+| Value 3e-4 |    9 |     3 |     6 |    0 |   94.3s |
+
+Neither candidate improved aggregate wins, so the family is rejected. Global-value checkpoints remain research-only, and export now rejects them explicitly rather than silently omitting the unsupported head. The promoted checkpoint and browser artifact remain unchanged.
