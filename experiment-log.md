@@ -5103,3 +5103,46 @@ On 20 fresh games from opening offset 4,580,000, control won seven games, split 
 | Candidate |   44 |    16 |    28 |    0 |  515.0s |
 
 The screen gain reversed to a three-game loss, driven by four lost Black games. The denser architecture is rejected without a second confirmation block. Generalized checkpoint and export support remain available for reproducibility, but the promoted checkpoint and browser artifact remain unchanged.
+
+## 2026-07-28 — Fresh promoted-Moka on-policy labels
+
+### Hypothesis
+
+Every existing b18 corpus was generated from an older Moka. The promoted global-context player reaches different states, so stale trajectory coverage may limit further adapter training. Three disjoint 64-game blocks were generated from the exact promoted player against b6c96. Only Moka turns were eligible; one quarter were selected through equal uniform and b6-regret sampling, then native b18 analyzed them at 128 visits with policy, value, child-Q, ownership, and score outputs.
+
+| Opening offset | Roots | b18 top-move match | Searched Moka move coverage | Regret at least 0.20 | SHA-256                                                            |
+| -------------: | ----: | -----------------: | --------------------------: | -------------------: | :----------------------------------------------------------------- |
+|      4,700,000 |   498 |              31.1% |                       79.1% |                   49 | `0d5987ecf9e6861a343ce49714113c5f5806aeb6a0c2aa9894fad9f82108538b` |
+|      4,710,000 |   493 |              27.6% |                       80.9% |                   39 | `aa970371a3dee56b87964eea1b49b3d09c2f6b1e12d8d3a1e8e4a78ab87db31b` |
+|      4,720,000 |   495 |              32.5% |                       82.2% |                   35 | `e263dfae8829d8b9bd195ce04057760598113b3dfa6d31bb2495a0a431739f10` |
+
+The diagnostic initially read the optional `moka_moves` field, which remains the pass sentinel unless counterfactual reanalysis runs. The actual searched action is `rollout_moves`. Recomputing every statistic with that authoritative field produced the values above and confirmed correct move alignment.
+
+### First-block replay
+
+The first block was replayed fourfold alongside the three established b18 corpora. Three adapter-only candidates used two exact-QAT epochs, policy-preservation weight 0.25, seed 341, and learning rates 0.000003, 0.00001, and 0.00003. All three slightly regressed the first block's 55-root test split but improved the second, then-untouched block. No candidate entered the arena.
+
+### Two-block replay and frozen arbitration
+
+A second family balanced the first two on-policy blocks at twofold replay alongside the established b18 corpora. It used the same two epochs, preservation weight, and learning-rate family with seed 343. Every candidate improved the second on-policy test block and all established 64-, 128-, and 256-visit test sets, but regressed the first on-policy test block.
+
+All recipes and checkpoints were frozen before collecting the third block. On its untouched 51-root test split:
+
+| Player           |   Loss | Top move | Value MAE |
+| :--------------- | -----: | -------: | --------: |
+| Control          | 3.0335 |    35.3% |    0.4264 |
+| First-block 3e-6 | 3.0271 |    37.3% |    0.4262 |
+| First-block 1e-5 | 3.0215 |    37.3% |    0.4261 |
+| First-block 3e-5 | 3.0125 |    37.3% |    0.4250 |
+| Two-block 3e-6   | 3.0292 |    35.3% |    0.4262 |
+| Two-block 1e-5   | 3.0205 |    37.3% |    0.4258 |
+| Two-block 3e-5   | 3.0101 |    37.3% |    0.4249 |
+
+The two-block 0.00003 candidate was the unique lowest-loss checkpoint on the predeclared arbitration set. It advanced unchanged to 20 paired games at opening offset 4,800,000:
+
+| Player    | Wins | Black | White | Caps | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | ------: |
+| Control   |   12 |     6 |     6 |    0 |   82.1s |
+| Candidate |   12 |     6 |     6 |    0 |   83.0s |
+
+The candidate tied every outcome aggregate and did not advance. Fresh current-player labels remain valuable data, but this replay schedule is rejected. The promoted checkpoint and browser artifact remain unchanged.
