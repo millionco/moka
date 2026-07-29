@@ -4978,3 +4978,51 @@ Every candidate also lowered loss on the separate 128- and 256-visit test splits
 | Adapter 3e-5 |    8 |     7 |     1 |    0 |   55.8s |
 
 The deeper-label family is rejected without confirmation. Exact preservation remains in the trainer because it aligns the regularizer with the deployed player, but no checkpoint or browser artifact changes.
+
+## 2026-07-28 — Global-context search recalibration
+
+The promoted global-residual model changes policy and value estimates inside search, so the two most important PUCT coefficients were re-audited without combining changes. Every run used the exact promoted INT8 checkpoint, 64 evaluations, full root and descendant symmetry, opponent width 4, FPU reduction 0.5, and the accepted area-scored terminal rule.
+
+### Exploration
+
+Five exploration coefficients used the same 20 paired games from opening offset 4,500,000:
+
+| Exploration | Wins | Black | White | Caps |
+| ----------: | ---: | ----: | ----: | ---: |
+|        1.25 |    7 |     3 |     4 |    0 |
+|        1.50 |   10 |     4 |     6 |    0 |
+|        1.75 |    6 |     3 |     3 |    0 |
+|        2.00 |    6 |     3 |     3 |    1 |
+|        2.25 |    8 |     3 |     5 |    0 |
+
+Exploration 1.50 was frozen as the unique screen winner. Two untouched confirmation blocks produced:
+
+| Opening offset | Exploration 1.75 | Exploration 1.50 | Control Black / White | Candidate Black / White | Control / candidate caps | Control / candidate runtime |
+| -------------: | ---------------: | ---------------: | :-------------------- | :---------------------- | -----------------------: | --------------------------: |
+|      4,510,000 |               40 |               45 | 20 / 20               | 20 / 25                 |                    0 / 1 |             301.7s / 306.3s |
+|      4,520,000 |               38 |               37 | 19 / 19               | 20 / 17                 |                    0 / 0 |             307.7s / 309.4s |
+|      **Total** |           **78** |           **82** | **39 / 39**           | **40 / 42**             |                **0 / 1** |         **609.4s / 615.7s** |
+
+The five-game first-block gain reversed to a one-game loss. The candidate also introduced a capped loss. Exploration 1.50 is rejected; 1.75 remains accepted.
+
+### Value weight
+
+With exploration restored to 1.75, five value weights used 20 fresh games from opening offset 4,530,000:
+
+| Value weight | Wins | Black | White | Caps |
+| -----------: | ---: | ----: | ----: | ---: |
+|        1.000 |    9 |     3 |     6 |    0 |
+|        1.125 |    6 |     2 |     4 |    0 |
+|        1.250 |    6 |     2 |     4 |    0 |
+|        1.375 |   10 |     4 |     6 |    0 |
+|        1.500 |   12 |     6 |     6 |    0 |
+
+Value weight 1.50 was the unique screen winner. Its two frozen confirmation blocks produced:
+
+| Opening offset | Value 1.25 | Value 1.50 | Control Black / White | Candidate Black / White | Control / candidate caps | Control / candidate runtime |
+| -------------: | ---------: | ---------: | :-------------------- | :---------------------- | -----------------------: | --------------------------: |
+|      4,540,000 |         41 |         45 | 27 / 14               | 31 / 14                 |                    0 / 0 |             467.5s / 468.1s |
+|      4,550,000 |         51 |         48 | 29 / 22               | 27 / 21                 |                    0 / 0 |             442.1s / 439.6s |
+|      **Total** |     **92** |     **93** | **56 / 36**           | **58 / 35**             |                **0 / 0** |         **909.6s / 907.7s** |
+
+The four-game first-block gain reversed to a three-game loss. A one-game aggregate edge with opposite block directions is not evidence of stronger play. Value weight 1.50 is rejected; 1.25 remains accepted. The promoted global-residual model and browser artifact remain unchanged.
