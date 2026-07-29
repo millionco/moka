@@ -659,6 +659,10 @@ def train(
                 and not use_global_residual_network
             ),
         )
+        if use_int8_quantization_aware_training:
+            reference_model.update(
+                fake_quantize_int8_parameters(reference_model.parameters())
+            )
         reference_model.freeze()
         reference_model.eval()
     if train_global_adapter_only and train_global_residual_adapter_only:

@@ -4948,3 +4948,33 @@ The promoted browser binary is 113,648 bytes and 100,666 bytes under determinist
 - browser manifest: `94ada54b21e63ca44a8ca8669fbd0ab0ed702942eff060feb31f2f83b51a4cad`.
 
 The global-residual checkpoint and browser artifact are promoted. The accepted 64-evaluation search remains unchanged. The Million website remains untouched.
+
+## 2026-07-28 — Exact INT8 preservation and deeper global-context labels
+
+### Quantized preservation correction
+
+Quantization-aware training previously compared each candidate with the float-shadow reference in its policy-preservation term. That reference is not the deployed player: on the held-out offset-3,500,000 symmetry-consensus bucket, the old float shadow matched only 51.1% of the exact INT8 player's top moves. The trainer now quantizes the frozen reference before computing preservation loss whenever exact INT8-aware training is enabled.
+
+The successful global-residual recipe was replayed from the same seed-260 initialization, data, seed 306, learning rate 0.00001, and three-epoch schedule with only this correction. The replay improved exact held-out loss over the promoted candidate on all seven inspected b18 and symmetry corpora. On 20 fresh paired games from opening offset 4,480,000, however, both players won nine games with zero caps. The promoted model split 4 Black / 5 White in 58.9 seconds; the replay split 5 Black / 4 White in 63.5 seconds. The replay is rejected as a tie.
+
+### Separate 128- and 256-visit labels
+
+Three incremental adapter-only candidates started from the promoted model. They used 2,489 training rows from the offset-3,300,000 128-visit auxiliary corpus, the offset-3,400,000 root and branch corpora, and the offset-3,200,000 256-visit corpus. Each used two epochs, exact INT8 preservation, policy-preservation weight 0.25, and a predeclared learning rate:
+
+| Learning rate | b18 3,000,000 loss | b18 3,100,000 loss | b18 3,500,000 loss | Consensus top move |
+| ------------: | -----------------: | -----------------: | -----------------: | -----------------: |
+|       Control |             2.8980 |             2.7451 |             2.9435 |              75.6% |
+|      0.000003 |             2.8937 |             2.7414 |             2.9380 |              75.1% |
+|      0.000010 |             2.8867 |             2.7366 |             2.9306 |              76.0% |
+|      0.000030 |             2.8842 |             2.7351 |             2.9279 |              75.1% |
+
+Every candidate also lowered loss on the separate 128- and 256-visit test splits. All three entered the fixed 20-game screen at opening offset 4,490,000:
+
+| Player         | Wins | Black | White | Caps | Runtime |
+| :------------- | ---: | ----: | ----: | ---: | ------: |
+| Control        |    9 |     6 |     3 |    1 |   57.2s |
+| Adapter 3e-6   |    8 |     6 |     2 |    0 |   55.7s |
+| Adapter 1e-5   |    8 |     5 |     3 |    0 |   57.7s |
+| Adapter 3e-5   |    8 |     7 |     1 |    0 |   55.8s |
+
+The deeper-label family is rejected without confirmation. Exact preservation remains in the trainer because it aligns the regularizer with the deployed player, but no checkpoint or browser artifact changes.
