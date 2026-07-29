@@ -13,7 +13,10 @@ from go_model.config import (
     INPUT_PLANE_COUNT,
     POLICY_MOVE_COUNT,
 )
-from go_model.symmetry_distill import create_symmetry_consensus_targets
+from go_model.symmetry_distill import (
+    create_ensemble_symmetry_consensus_targets,
+    create_symmetry_consensus_targets,
+)
 
 
 class BlunderRiskTests(unittest.TestCase):
@@ -87,6 +90,36 @@ class BlunderRiskTests(unittest.TestCase):
             np.asarray([0.75, 0.25]),
         )
         self.assertAlmostEqual(float(consensus_values[0]), 3.5)
+
+    def test_symmetry_consensus_aggregates_checkpoint_ensemble(self) -> None:
+        first_policies = np.zeros(
+            (1, 8, POLICY_MOVE_COUNT),
+            dtype=np.float32,
+        )
+        second_policies = np.zeros_like(first_policies)
+        first_policies[:, :, 0] = 0.75
+        first_policies[:, :, 1] = 0.25
+        second_policies[:, :, 0] = 0.25
+        second_policies[:, :, 1] = 0.75
+        first_values = np.ones((1, 8), dtype=np.float32)
+        second_values = np.full((1, 8), -0.5, dtype=np.float32)
+
+        consensus_policies, consensus_values = (
+            create_ensemble_symmetry_consensus_targets(
+                [first_policies, second_policies],
+                [first_values, second_values],
+            )
+        )
+
+        np.testing.assert_allclose(
+            consensus_policies[0, :2],
+            np.asarray([0.5, 0.5]),
+        )
+        self.assertAlmostEqual(float(consensus_values[0]), 0.25)
+
+    def test_symmetry_consensus_rejects_empty_checkpoint_ensemble(self) -> None:
+        with self.assertRaises(ValueError):
+            create_ensemble_symmetry_consensus_targets([], [])
 
 
 if __name__ == "__main__":

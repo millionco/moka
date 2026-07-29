@@ -4459,3 +4459,95 @@ Pseudo-count 0.5 advanced as the unique screen leader.
 On 100 untouched paired games from opening offset 4,070,000, the unshrunk control won 46 games, split 25 Black and 21 White, with zero caps in 284.5 seconds. Pseudo-count 0.5 won 43, split 26 Black and 17 White, with zero caps in 285.6 seconds.
 
 The candidate lost three games and regressed primarily as White. It is rejected without a second confirmation block. Child-Q pseudo-count zero remains accepted. The independent research control remains available for reproducibility. The checkpoint, browser artifact, search defaults, and Million website remain unchanged.
+
+## 2026-07-28 — Full-network sibling soups
+
+### Hypothesis
+
+Full-network symmetry-distillation seeds 260–262 used the same initialization, data, exact-QAT recipe, learning rate, and preservation objective. All three passed the original offline gate, but seed 260 alone advanced because it led the 20-game arena screen. Averaging sibling solutions could reduce seed-specific error without changing architecture, parameter count, browser payload, search, or inference cost.
+
+Every candidate was averaged in float parameter space and then materialized through the exact INT8 deployment path before evaluation. The accepted seed-260 checkpoint remained the control.
+
+### Equal-weight blends
+
+Three blends were measured on the test splits of the promoted-model consensus corpus and two independent b18 corpora:
+
+| Exact checkpoint            | Consensus loss / move / value | b18 3,300,000 loss / move / value | b18 3,500,000 loss / move / value |
+| :-------------------------- | :---------------------------- | :-------------------------------- | :-------------------------------- |
+| Accepted seed 260           | 2.2734 / 75.6% / 0.1214       | 2.9976 / 38.1% / 0.6045           | 2.9491 / 29.3% / 0.6076           |
+| 50% seed 260 + 50% seed 261 | 2.2747 / 76.9% / 0.1233       | 2.9996 / 37.3% / 0.6041           | 2.9510 / 30.2% / 0.6063           |
+| 50% seed 260 + 50% seed 262 | 2.2729 / 76.4% / 0.1217       | 2.9951 / 36.4% / 0.6018           | 2.9450 / 29.8% / 0.6069           |
+| Equal seeds 260–262         | 2.2738 / 77.3% / 0.1222       | 2.9974 / 37.3% / 0.6024           | 2.9469 / 30.7% / 0.6061           |
+
+The seed-260/261 blend regressed loss on every corpus and was rejected offline. The other two advanced to 20 fresh games from opening offset 4,080,000:
+
+| Player                      | Wins | Black | White | Caps | Runtime |
+| :-------------------------- | ---: | ----: | ----: | ---: | ------: |
+| Accepted seed 260           |    8 |     4 |     4 |    0 |   57.1s |
+| 50% seed 260 + 50% seed 262 |    7 |     4 |     3 |    0 |   57.2s |
+| Equal seeds 260–262         |    8 |     3 |     5 |    0 |   56.5s |
+
+Neither equal-weight blend uniquely improved the control.
+
+### Shrunk sibling contribution
+
+One bounded refinement reduced the sibling contribution from 50% to 25%. The first candidate used 75% seed 260 and 25% seed 262. The second used 75% seed 260 and 12.5% each of seeds 261 and 262.
+
+| Exact checkpoint                               | Consensus loss / move / value | b18 3,300,000 loss / move / value | b18 3,500,000 loss / move / value |
+| :--------------------------------------------- | :---------------------------- | :-------------------------------- | :-------------------------------- |
+| Accepted seed 260                              | 2.2734 / 75.6% / 0.1214       | 2.9976 / 38.1% / 0.6045           | 2.9491 / 29.3% / 0.6076           |
+| 75% seed 260 + 25% seed 262                    | 2.2732 / 75.6% / 0.1219       | 2.9961 / 38.1% / 0.6031           | 2.9477 / 29.3% / 0.6075           |
+| 75% seed 260 + 12.5% seed 261 + 12.5% seed 262 | 2.2731 / 76.4% / 0.1199       | 2.9949 / 37.3% / 0.6021           | 2.9467 / 30.2% / 0.6062           |
+
+Both restrained blends improved loss on every test corpus. On 20 fresh games from opening offset 4,090,000:
+
+| Player                                         | Wins | Black | White | Caps | Runtime |
+| :--------------------------------------------- | ---: | ----: | ----: | ---: | ------: |
+| Accepted seed 260                              |    9 |     6 |     3 |    0 |   54.3s |
+| 75% seed 260 + 25% seed 262                    |    9 |     6 |     3 |    0 |   54.3s |
+| 75% seed 260 + 12.5% seed 261 + 12.5% seed 262 |   10 |     7 |     3 |    0 |   58.0s |
+
+The three-seed restrained blend advanced as the unique screen leader. Its exact-dequantized checkpoint has SHA-256 `da5fad01a83d6e411c5a037ece169e5b47a12e4d8feb6ed7d83f49b60be9b996`.
+
+### Confirmation
+
+Two untouched paired 100-game blocks compared the frozen candidate with the accepted checkpoint:
+
+| Opening offset | Control wins | Candidate wins | Control Black / White | Candidate Black / White | Control / candidate caps | Control / candidate runtime |
+| -------------: | -----------: | -------------: | :-------------------- | :---------------------- | -----------------------: | --------------------------: |
+|      4,100,000 |           38 |             42 | 23 / 15               | 23 / 19                 |                    0 / 0 |             279.9s / 276.7s |
+|      4,110,000 |           47 |             44 | 27 / 20               | 24 / 20                 |                    0 / 1 |             287.4s / 422.8s |
+|      **Total** |       **85** |         **86** | **50 / 35**           | **47 / 39**             |                **0 / 1** |         **567.3s / 699.5s** |
+
+The candidate's four-game first-block gain reversed to a three-game loss in the second block. Its one-game aggregate edge was accompanied by a new 116-move unique-state cap and 23.3% greater total runtime. The result is indistinguishable from arena variance and fails the no-cap-regression gate.
+
+All sibling soups are rejected. The accepted checkpoint, 104,129-parameter architecture, 111,920-byte browser artifact, search defaults, and Million website remain unchanged.
+
+## 2026-07-28 — Sibling prediction-ensemble distillation
+
+### Hypothesis
+
+Parameter soups indiscriminately averaged internal features and failed the arena gate. Prediction-space ensembling can preserve complementary sibling outputs without requiring their internal representations to align. The symmetry-target generator now accepts repeated checkpoints and aggregates every aligned policy and value across checkpoints and board symmetries. A three-checkpoint teacher therefore used 24 predictions per training position offline while retaining one unchanged student at inference.
+
+Exact INT8 checkpoints for full-network seeds 260–262 generated three deterministic corpora:
+
+| Opening offset | Positions | Compressed bytes | SHA-256                                                            |
+| -------------: | --------: | ---------------: | :----------------------------------------------------------------- |
+|      3,000,000 |     2,181 |        1,125,645 | `d2633e112aa8ca95e9275b92e979971dd98d26ebf2251f3e78e8c162cda76d63` |
+|      3,100,000 |     2,154 |        1,099,115 | `3da5a4bc2009c49a087a12ba59dd9a601d6567f478a2e7570d9e7876ab7ee62a` |
+|      3,500,000 |     2,145 |        1,040,466 | `b24d69d4599e01210d5cc4cc82f56d31f170bb6a3689c58aee6fbeafc5629a92` |
+
+### Exact-QAT students
+
+Seeds 280–282 started from the accepted float shadow and used one epoch, learning rate 0.000005, policy preservation weight 0.25, and exact INT8-aware training. Every candidate regressed offline:
+
+| Test corpus                  | Accepted loss / move / value | Candidate range                             |
+| :--------------------------- | :--------------------------- | :------------------------------------------ |
+| Sibling ensemble 3,500,000   | 2.2747 / 75.1% / 0.1191      | 2.2954–2.2968 / 71.6%–72.0% / 0.1352–0.1370 |
+| Seed-260 consensus 3,500,000 | 2.2734 / 75.6% / 0.1214      | 2.2935–2.2949 / 72.0%–72.4% / 0.1369–0.1388 |
+| b18 3,300,000                | 2.9976 / 38.1% / 0.6045      | 3.0228–3.0254 / 37.3%–38.1% / 0.6023–0.6046 |
+| b18 3,500,000                | 2.9491 / 29.3% / 0.6076      | 2.9963–2.9986 / 28.4% / 0.6180–0.6182       |
+
+One bounded step-size check used seed 283 at learning rate 0.000001. It still regressed sibling-ensemble loss to 2.2778, seed-260 consensus loss to 2.2765, b18 3,300,000 loss to 3.0053, and b18 3,500,000 loss to 2.9593. Its value error also regressed on every corpus.
+
+The smaller update did not rescue the objective, identifying the ensemble target rather than excessive step size as the problem. No candidate entered the arena. Multi-checkpoint target generation remains available for future independent teacher ensembles, but sibling prediction ensembling is rejected. The accepted checkpoint, browser artifact, search defaults, and Million website remain unchanged.

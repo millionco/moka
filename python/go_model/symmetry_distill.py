@@ -29,6 +29,20 @@ def create_symmetry_consensus_targets(
     return consensus_policies, consensus_values
 
 
+def create_ensemble_symmetry_consensus_targets(
+    aligned_policy_sets: list[np.ndarray],
+    symmetry_value_sets: list[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray]:
+    if not aligned_policy_sets or len(aligned_policy_sets) != len(
+        symmetry_value_sets
+    ):
+        raise ValueError("Policy and value sets must have the same nonzero length.")
+    return create_symmetry_consensus_targets(
+        np.concatenate(aligned_policy_sets, axis=1),
+        np.concatenate(symmetry_value_sets, axis=1),
+    )
+
+
 def mix_source_and_consensus_targets(
     source_policies: np.ndarray,
     source_values: np.ndarray,
@@ -53,27 +67,32 @@ def mix_source_and_consensus_targets(
 
 def create_symmetry_consensus_dataset(
     dataset_path: Path,
-    checkpoint_path: Path,
+    checkpoint_paths: list[Path],
     output_path: Path,
     batch_size: int,
     source_target_weight: float,
 ) -> None:
     dataset = np.load(dataset_path)
     features = dataset["features"].astype(np.float32)
-    model = MokaNestedNetwork()
-    model.load_weights(str(checkpoint_path))
-    model.eval()
-    aligned_policies, symmetry_values = (
-        evaluate_aligned_symmetry_outputs(
+    aligned_policy_sets: list[np.ndarray] = []
+    symmetry_value_sets: list[np.ndarray] = []
+
+    for checkpoint_path in checkpoint_paths:
+        model = MokaNestedNetwork()
+        model.load_weights(str(checkpoint_path))
+        model.eval()
+        aligned_policies, symmetry_values = evaluate_aligned_symmetry_outputs(
             model,
             features,
             batch_size,
         )
-    )
+        aligned_policy_sets.append(aligned_policies)
+        symmetry_value_sets.append(symmetry_values)
+
     consensus_policies, consensus_values = (
-        create_symmetry_consensus_targets(
-            aligned_policies,
-            symmetry_values,
+        create_ensemble_symmetry_consensus_targets(
+            aligned_policy_sets,
+            symmetry_value_sets,
         )
     )
     output_policies, output_target_values = (
@@ -97,6 +116,7 @@ def create_symmetry_consensus_dataset(
     print(
         f"saved {output_path} "
         f"positions={len(features):,} "
+        f"checkpoints={len(checkpoint_paths)} "
         f"bytes={output_path.stat().st_size:,}"
     )
 
@@ -104,7 +124,12 @@ def create_symmetry_consensus_dataset(
 def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--data", required=True, type=Path)
-    argument_parser.add_argument("--checkpoint", required=True, type=Path)
+    argument_parser.add_argument(
+        "--checkpoint",
+        action="append",
+        required=True,
+        type=Path,
+    )
     argument_parser.add_argument("--output", required=True, type=Path)
     argument_parser.add_argument(
         "--batch-size",
