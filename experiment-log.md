@@ -7026,13 +7026,32 @@ The primary collection produced 57,566 unique leaves from 256 phase-stratified r
 
 The frozen one-epoch run reached training loss 0.2896, validation MAE 0.3067, and primary test MAE 0.2559. Exact prefix materialization changed exactly the six value-head tensors and no trunk, policy, or adapter tensor. The float candidate has SHA-256 `563ed93123c20544a1699c0e9b1204e3a1c158d52b303314b684e3897b35b92d`; the 434,471-byte exact candidate has SHA-256 `3b8ea35b858385018fe0dac66d0c24487c1336087fc0b3dc28887489f01f6601`.
 
-| Evaluation domain | Model | Positions | Value MAE | Sign agreement |
-| :---------------- | :---- | --------: | --------: | -------------: |
-| Primary paired test leaves | Accepted | 7,114 | 0.275346 | 87.279% |
-| | Candidate | 7,114 | 0.255887 | 88.347% |
-| Untouched offset-11M leaves | Accepted | 15,434 | 0.316425 | 87.346% |
-| | Candidate | 15,434 | 0.290261 | 89.523% |
-| Broad offset-6.05M root test | Accepted | 861 | 0.486263 | 84.088% |
-| | Candidate | 861 | 0.499724 | 79.907% |
+| Evaluation domain            | Model     | Positions | Value MAE | Sign agreement |
+| :--------------------------- | :-------- | --------: | --------: | -------------: |
+| Primary paired test leaves   | Accepted  |     7,114 |  0.275346 |        87.279% |
+|                              | Candidate |     7,114 |  0.255887 |        88.347% |
+| Untouched offset-11M leaves  | Accepted  |    15,434 |  0.316425 |        87.346% |
+|                              | Candidate |    15,434 |  0.290261 |        89.523% |
+| Broad offset-6.05M root test | Accepted  |       861 |  0.486263 |        84.088% |
+|                              | Candidate |       861 |  0.499724 |        79.907% |
 
 The candidate improves untouched leaf MAE by 0.026165 and sign agreement by 2.177 percentage points, confirming that the collected target distribution is learnable. It misses the primary improvement floor by 0.000541 and, more importantly, worsens broad-root MAE by 0.013460 while losing 4.181 percentage points of root sign agreement. It fails the root-safety gate decisively. No independent-root measurement, seed-526 search arbitration, arena game, alternate replay ratio, learning rate, epoch, or phase weighting is run. The accepted checkpoint remains unchanged. The reusable collector is retained because it exposes the search distribution without altering inference.
+
+## 2026-07-31 — Preregistered balanced root/leaf value calibration
+
+The rejected leaf candidate establishes two facts without an arena confound: its untouched search-leaf MAE improves by 0.026165, but 43,293 primary training leaves outweigh 6,964 broad replay roots by 6.22 to one and broad-root calibration regresses. The next experiment changes only that measured mixture imbalance. Six identical inclusions of the frozen offset-6,050,000 corpus contribute 41,784 root examples, nearly matching the 43,293 leaf examples. Repetition changes sampling mass, not the available positions or targets.
+
+Exactly one candidate is frozen. It starts again from the accepted exact checkpoint and trains only `value_convolution`, `value_hidden`, and `value_output` for one exact-quantization-aware epoch, batch size 256, learning rate 0.00001, seed 535, paired-game split size two, and random board symmetries. The primary leaf archive and all six replay copies use their already frozen b18 scalar labels. No policy, trunk, adapter, architecture, parameter count, payload, phase weighting, alternate replay ratio, rate, seed, or epoch is allowed.
+
+The exact candidate must improve untouched offset-11,000,000 search-leaf MAE by at least 0.015 without losing sign agreement; improve primary paired test-leaf MAE by at least 0.010 without losing sign agreement; keep broad offset-6,050,000 root MAE no worse than accepted and root sign agreement unchanged or better; and keep independent offset-4,720,000 root MAE within 0.001 and sign agreement unchanged or better. Every tensor outside the six value-head tensors must be byte-identical, and policy logits must be bit-identical. A passing candidate enters the frozen seed-526 128-root b18 top-move arbitration at accepted 256-visit search. It must improve 80 matches to at least 84, preserve both colors, and remain within 5% runtime. Only a passing search candidate receives a 20-game paired arena screen at fresh offset 9,580,000 with the prior two-win, neither-color-worse, no-added-cap-or-resignation, and 5% runtime gates.
+
+The frozen run reached training loss 0.3502, validation MAE 0.3121, and primary test MAE 0.2635. Exact materialization again changed only the six value-head tensors, left policy logits bit-identical on all four evaluation domains, and remained 434,471 bytes. The float checkpoint has SHA-256 `98ce7139399fcb925dd561fddd4bf644b1b3f4eca74c5d26dac0b58c72faefcb`; the exact checkpoint has SHA-256 `95274a280c4215bcbf31a62a57df7252a8f3b86fb8534791ea932a8924d025a4`.
+
+| Evaluation domain              | Accepted MAE | Candidate MAE | Accepted sign | Candidate sign |
+| :----------------------------- | -----------: | ------------: | ------------: | -------------: |
+| Primary paired test leaves     |     0.275346 |      0.263476 |       87.279% |        87.981% |
+| Untouched offset-11M leaves    |     0.316425 |      0.307242 |       87.346% |        87.845% |
+| Broad offset-6.05M root test   |     0.486263 |      0.477338 |       84.088% |        83.856% |
+| Independent offset-4.72M roots |     0.436611 |      0.441905 |       84.242% |        84.444% |
+
+Balanced replay improves primary leaves by 0.011870 and broad-root MAE by 0.008925, but improves untouched leaves by only 0.009184 rather than the required 0.015. Broad-root sign agreement loses 0.232 percentage points, and independent-root MAE regresses by 0.005294, exceeding its +0.001 ceiling. The candidate fails three preregistered gates and receives no seed-526 search arbitration, arena play, replay-ratio interpolation, or second epoch. The accepted checkpoint remains unchanged.
