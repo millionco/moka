@@ -38,7 +38,7 @@
     "arena": "vp dev --config arena.vite.config.ts --host 0.0.0.0 --port 4174",
     "arena:build": "vp build --config arena.vite.config.ts",
     "build": "vp pack",
-    "test": "nr build && node tests/automatic-scoring-smoke.mjs && node tests/model-smoke.mjs && uv run python tests/board.py && uv run python tests/features.py && uv run python tests/symmetry.py && uv run python tests/blunder.py && uv run python tests/collect.py && uv run python tests/policy.py && uv run python tests/quantization.py && uv run python tests/search.py && uv run python tests/search-generate.py && uv run python tests/value.py",
+    "test": "nr build && node tests/automatic-scoring-smoke.mjs && node tests/model-smoke.mjs && uv run python tests/board.py && uv run python tests/features.py && uv run python tests/symmetry.py && uv run python tests/blunder.py && uv run python tests/collect.py && uv run python tests/policy.py && uv run python tests/quantization.py && uv run python tests/search.py && uv run python tests/search-generate.py && uv run python tests/optimistic-generate.py && uv run python tests/optimistic-policy.py && uv run python tests/uncertainty.py && uv run python tests/value.py",
     "check": "vp check",
     "check:fix": "vp check --fix"
   },

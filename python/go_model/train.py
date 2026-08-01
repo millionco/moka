@@ -12,6 +12,7 @@ from go_model.config import (
     BOARD_SIZE,
     DEFAULT_BATCH_SIZE,
     DEFAULT_EPOCH_COUNT,
+    DEFAULT_GAME_PAIR_SIZE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_RANDOM_SEED,
     GLOBAL_RESIDUAL_BLOCK_INTERVAL,
@@ -27,7 +28,6 @@ from go_model.config import (
     SHORT_VALUE_TARGET_WEIGHT,
     SOFT_POLICY_LOSS_WEIGHT,
     SOFT_POLICY_TEMPERATURE,
-    SPLIT_BUCKET_COUNT,
     SYMMETRY_FLIP_OPTION_COUNT,
     SYMMETRY_ROTATION_COUNT,
     TEST_BUCKET_INDEX,
@@ -41,7 +41,6 @@ from go_model.model import (
     GlobalNestedBottleneckBlock,
     MokaAttentionAuxiliaryNetwork,
     MokaAuxiliaryNetwork,
-    MokaNestedNetwork,
     MokaNetwork,
     MokaQAuxiliaryNetwork,
     MokaSoftPolicyNetwork,
@@ -51,6 +50,7 @@ from go_model.model import (
     get_checkpoint_global_residual_block_interval,
 )
 from go_model.quantization import fake_quantize_int8_parameters
+from go_model.split import create_game_split_buckets
 from go_model.symmetry import apply_batch_board_symmetry, apply_batch_spatial_symmetry
 
 
@@ -329,17 +329,22 @@ def evaluate(
     policy_targets: np.ndarray,
     value_targets: np.ndarray,
     batch_size: int,
+    evaluation_weights: np.ndarray | None = None,
 ) -> tuple[float, float, float]:
-    losses: list[float] = []
-    correct_move_count = 0
+    if evaluation_weights is None:
+        evaluation_weights = np.ones(len(features), dtype=np.float32)
+    weighted_loss_sum = 0.0
+    correct_move_weight = 0.0
     value_absolute_error_sum = 0.0
+    total_weight = float(np.sum(evaluation_weights))
 
     for batch_start in range(0, len(features), batch_size):
         batch_end = batch_start + batch_size
         feature_batch = mx.array(features[batch_start:batch_end], dtype=mx.float32)
         policy_batch = mx.array(policy_targets[batch_start:batch_end], dtype=mx.float32)
         value_batch = mx.array(value_targets[batch_start:batch_end], dtype=mx.float32)
-        sample_weights = mx.ones(len(feature_batch), dtype=mx.float32)
+        weight_batch_array = evaluation_weights[batch_start:batch_end]
+        sample_weights = mx.array(weight_batch_array, dtype=mx.float32)
         ownership_targets = mx.zeros(
             (len(feature_batch), BOARD_SIZE, BOARD_SIZE),
             dtype=mx.float32,
@@ -381,19 +386,28 @@ def evaluate(
         )
         policy_logits, values = model(feature_batch)
         mx.eval(loss, policy_logits, values)
-        losses.append(float(loss.item()))
+        batch_weight = float(np.sum(weight_batch_array))
+        weighted_loss_sum += float(loss.item()) * batch_weight
         predicted_moves = np.asarray(mx.argmax(policy_logits, axis=1))
         target_moves = np.argmax(policy_targets[batch_start:batch_end], axis=1)
-        correct_move_count += int(np.sum(predicted_moves == target_moves))
+        correct_move_weight += float(
+            np.sum(weight_batch_array * (predicted_moves == target_moves))
+        )
         predicted_values = np.asarray(values)
         value_absolute_error_sum += float(
-            np.sum(np.abs(predicted_values - value_targets[batch_start:batch_end]))
+            np.sum(
+                weight_batch_array
+                * np.abs(
+                    predicted_values
+                    - value_targets[batch_start:batch_end]
+                )
+            )
         )
 
     return (
-        float(np.mean(losses)),
-        correct_move_count / len(features),
-        value_absolute_error_sum / len(features),
+        weighted_loss_sum / total_weight,
+        correct_move_weight / total_weight,
+        value_absolute_error_sum / total_weight,
     )
 
 
@@ -438,6 +452,9 @@ def train(
     train_global_value_adapter_only: bool,
     use_gated_global_residual_network: bool,
     train_global_gate_only: bool,
+    use_heuristic_adapter_network: bool,
+    train_heuristic_adapter_only: bool,
+    game_pair_size: int,
 ) -> None:
     checkpoint_global_residual_block_interval = (
         get_checkpoint_global_residual_block_interval(
@@ -529,7 +546,7 @@ def train(
     )
     random_generator = np.random.default_rng(random_seed)
     mx.random.seed(random_seed)
-    game_buckets = game_ids % SPLIT_BUCKET_COUNT
+    game_buckets = create_game_split_buckets(game_ids, game_pair_size)
     validation_mask = game_buckets == VALIDATION_BUCKET_INDEX
     test_mask = game_buckets == TEST_BUCKET_INDEX
     validation_indexes = np.flatnonzero(validation_mask)
@@ -552,8 +569,12 @@ def train(
         supplemental_dataset = np.load(supplemental_dataset_path)
         supplemental_features = supplemental_dataset["features"].astype(np.float32)
         supplemental_game_ids = supplemental_dataset["game_ids"]
+        supplemental_game_buckets = create_game_split_buckets(
+            supplemental_game_ids,
+            game_pair_size,
+        )
         supplemental_training_mask = ~np.isin(
-            supplemental_game_ids % SPLIT_BUCKET_COUNT,
+            supplemental_game_buckets,
             [VALIDATION_BUCKET_INDEX, TEST_BUCKET_INDEX],
         )
         supplemental_indexes = np.flatnonzero(supplemental_training_mask)
@@ -704,7 +725,11 @@ def train(
             MokaQAuxiliaryNetwork()
             if use_q_auxiliary
             else (
-                MokaAuxiliaryNetwork()
+                MokaAuxiliaryNetwork(
+                    global_residual_block_interval
+                    if use_global_residual_network
+                    else None
+                )
                 if use_auxiliary_network
                 else (
                     MokaSoftPolicyNetwork()
@@ -721,6 +746,7 @@ def train(
                         use_global_value_network,
                         False,
                         use_gated_global_residual_network,
+                        use_heuristic_adapter_network,
                     )
                 )
             )
@@ -759,6 +785,7 @@ def train(
             use_global_value_network,
             False,
             use_gated_global_residual_network,
+            use_heuristic_adapter_network,
         )
         reference_model.load_weights(
             str(initial_checkpoint_path),
@@ -781,6 +808,7 @@ def train(
             train_new_global_residual_adapters_only,
             train_global_value_adapter_only,
             train_global_gate_only,
+            train_heuristic_adapter_only,
         ]
     )
     if selected_global_adapter_mode_count > 1:
@@ -794,6 +822,14 @@ def train(
         model.global_pooling_hidden.unfreeze()
         model.global_policy_output.unfreeze()
         model.global_value_output.unfreeze()
+    elif train_heuristic_adapter_only:
+        if not use_heuristic_adapter_network:
+            raise ValueError(
+                "Heuristic adapter training requires the heuristic "
+                "adapter network."
+            )
+        model.freeze()
+        model.heuristic_adapter.unfreeze()
     elif train_global_gate_only:
         if not use_gated_global_residual_network:
             raise ValueError(
@@ -821,6 +857,10 @@ def train(
             ):
                 residual_block.global_pooling_hidden.unfreeze()
                 residual_block.global_bias_output.unfreeze()
+        if use_auxiliary_network:
+            model.auxiliary_ownership_convolution.unfreeze()
+            model.auxiliary_score_convolution.unfreeze()
+            model.auxiliary_score_output.unfreeze()
     elif train_new_global_residual_adapters_only:
         if (
             not use_global_residual_network
@@ -901,6 +941,7 @@ def train(
             use_global_value_network,
             False,
             use_gated_global_residual_network,
+            use_heuristic_adapter_network,
         )
         if use_int8_quantization_aware_training
         else None
@@ -1092,6 +1133,7 @@ def train(
             policies[validation_indexes],
             values[validation_indexes],
             batch_size,
+            sample_weights[validation_indexes],
         )
         print(
             f"epoch {epoch_index + 1:02d} "
@@ -1121,6 +1163,7 @@ def train(
         policies[test_indexes],
         values[test_indexes],
         batch_size,
+        sample_weights[test_indexes],
     )
     print(
         f"test={test_loss:.4f} "
@@ -1136,7 +1179,20 @@ def train(
         or use_q_auxiliary
         or use_attention_auxiliary
     ):
-        deployment_model = MokaNestedNetwork()
+        deployment_model = create_moka_network(
+            use_nested_network,
+            use_spatial_network,
+            use_recurrent_network,
+            use_context_network,
+            use_wide_network,
+            use_global_pool_network,
+            use_global_residual_network,
+            global_residual_block_interval,
+            use_global_value_network,
+            False,
+            use_gated_global_residual_network,
+            use_heuristic_adapter_network,
+        )
         deployment_parameters = [
             parameter
             for parameter in tree_flatten(model.parameters())
@@ -1222,6 +1278,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
     )
     argument_parser.add_argument(
+        "--heuristic-adapter",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--heuristic-adapter-only",
+        action="store_true",
+    )
+    argument_parser.add_argument(
         "--int8-quantization-aware",
         action="store_true",
     )
@@ -1245,6 +1309,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=Path,
     )
     argument_parser.add_argument("--seed", type=int, default=DEFAULT_RANDOM_SEED)
+    argument_parser.add_argument(
+        "--game-pair-size",
+        type=int,
+        default=DEFAULT_GAME_PAIR_SIZE,
+    )
     return argument_parser
 
 
@@ -1295,6 +1364,9 @@ def main() -> None:
         arguments.global_value_adapter_only,
         arguments.gated_global_residual,
         arguments.global_gate_only,
+        arguments.heuristic_adapter,
+        arguments.heuristic_adapter_only,
+        arguments.game_pair_size,
     )
 
 

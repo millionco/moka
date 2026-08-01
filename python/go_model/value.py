@@ -9,17 +9,203 @@ import numpy as np
 from go_model.config import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_EPOCH_COUNT,
+    DEFAULT_GAME_PAIR_SIZE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_RANDOM_SEED,
     PAIRWISE_VALUE_MINIMUM_GAP,
-    SPLIT_BUCKET_COUNT,
+    POLICY_MOVE_COUNT,
+    SCORE_HIDDEN_CHANNEL_COUNT,
+    SHORT_VALUE_AUXILIARY_LOSS_WEIGHT,
+    SYMMETRY_FLIP_OPTION_COUNT,
+    SYMMETRY_ROTATION_COUNT,
     TEST_BUCKET_INDEX,
     VALIDATION_BUCKET_INDEX,
 )
 from go_model.model import (
+    MokaGlobalResidualNetwork,
     MokaNestedNetwork,
     create_moka_network_for_checkpoint,
 )
+from go_model.quantization import fake_quantize_int8_parameters
+from go_model.split import create_game_split_buckets
+from go_model.symmetry import apply_batch_board_symmetry
+
+
+def create_value_targets(
+    dataset,
+    key_prefix: str,
+    outcome_target_weight: float,
+    short_value_target_weight: float,
+    root_search_target_weight: float,
+) -> np.ndarray:
+    if not 0 <= outcome_target_weight <= 1:
+        raise ValueError("Outcome target weight must be between zero and one.")
+    if not 0 <= short_value_target_weight <= 1:
+        raise ValueError(
+            "Short-value target weight must be between zero and one."
+        )
+    if not 0 <= root_search_target_weight <= 1:
+        raise ValueError(
+            "Root-search target weight must be between zero and one."
+        )
+    if (
+        outcome_target_weight
+        + short_value_target_weight
+        + root_search_target_weight
+        > 1
+    ):
+        raise ValueError(
+            "Value target weights must sum to at most one."
+        )
+
+    values = dataset[f"{key_prefix}values"].astype(np.float32)
+    if key_prefix:
+        return values
+
+    teacher_values = (
+        dataset["teacher_values"].astype(np.float32)
+        if "teacher_values" in dataset
+        else values
+    )
+    outcome_values = np.clip(values, -1, 1)
+    short_values = (
+        dataset["teacher_short_values"].astype(np.float32)
+        if "teacher_short_values" in dataset
+        else teacher_values
+    )
+    root_search_values = teacher_values
+    if "search_q_values" in dataset and "search_q_weights" in dataset:
+        search_q_values = dataset["search_q_values"].astype(np.float32)
+        search_q_weights = dataset["search_q_weights"].astype(np.float32)
+        root_visit_counts = np.sum(search_q_weights, axis=1)
+        searched_values = np.sum(
+            search_q_values * search_q_weights,
+            axis=1,
+        ) / np.maximum(root_visit_counts, 1)
+        root_search_values = np.where(
+            root_visit_counts > 0,
+            searched_values,
+            teacher_values,
+        )
+    return np.clip(
+        (
+            1
+            - outcome_target_weight
+            - short_value_target_weight
+            - root_search_target_weight
+        )
+        * teacher_values
+        + short_value_target_weight * short_values
+        + outcome_target_weight * outcome_values
+        + root_search_target_weight * root_search_values,
+        -1,
+        1,
+    )
+
+
+def create_short_value_targets(dataset, key_prefix: str) -> np.ndarray:
+    if key_prefix:
+        raise ValueError(
+            "Short-value auxiliary training does not support child targets."
+        )
+    if "teacher_short_values" not in dataset:
+        raise ValueError("Dataset does not contain teacher short values.")
+    return dataset["teacher_short_values"].astype(np.float32)
+
+
+def load_value_dataset(
+    dataset_path: Path,
+    use_child_targets: bool,
+    outcome_target_weight: float,
+    short_value_target_weight: float,
+    root_search_target_weight: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    dataset = np.load(dataset_path)
+    key_prefix = "child_" if use_child_targets else ""
+    features = dataset[f"{key_prefix}features"].astype(np.float32)
+    game_ids = dataset[f"{key_prefix}game_ids"]
+    values = create_value_targets(
+        dataset,
+        key_prefix,
+        outcome_target_weight,
+        short_value_target_weight,
+        root_search_target_weight,
+    )
+    sample_weights = (
+        dataset[f"{key_prefix}weights"].astype(np.float32)
+        if f"{key_prefix}weights" in dataset
+        else np.ones(len(features), dtype=np.float32)
+    )
+    return features, game_ids, values, sample_weights
+
+
+class MokaShortValueTrainingNetwork(nn.Module):
+    def __init__(self, base_model: MokaNestedNetwork) -> None:
+        super().__init__()
+        self.base_model = base_model
+        self.auxiliary_short_value_output = nn.Linear(
+            SCORE_HIDDEN_CHANNEL_COUNT,
+            1,
+        )
+        self.auxiliary_short_value_output.weight = mx.array(
+            base_model.value_output.weight
+        )
+        self.auxiliary_short_value_output.bias = mx.array(
+            base_model.value_output.bias
+        )
+
+    def __call__(
+        self,
+        inputs: mx.array,
+    ) -> tuple[mx.array, mx.array, mx.array]:
+        trunk_values = self.base_model.get_trunk_values(inputs)
+        policy_values = nn.relu(
+            self.base_model.policy_convolution(trunk_values)
+        )
+        policy_logits = self.base_model.policy_linear(
+            mx.flatten(policy_values, start_axis=1)
+        )
+        value_values = nn.relu(
+            self.base_model.value_convolution(trunk_values)
+        )
+        value_hidden = nn.relu(
+            self.base_model.value_hidden(
+                mx.flatten(value_values, start_axis=1)
+            )
+        )
+        long_value = mx.tanh(
+            self.base_model.value_output(value_hidden)
+        ).squeeze(-1)
+        short_value = mx.tanh(
+            self.auxiliary_short_value_output(value_hidden)
+        ).squeeze(-1)
+        return policy_logits, long_value, short_value
+
+
+def apply_random_value_symmetry(
+    features: np.ndarray,
+    random_generator: np.random.Generator,
+) -> np.ndarray:
+    rotation_counts = random_generator.integers(
+        0,
+        SYMMETRY_ROTATION_COUNT,
+        size=len(features),
+    )
+    should_flip = random_generator.integers(
+        0,
+        SYMMETRY_FLIP_OPTION_COUNT,
+        size=len(features),
+    ).astype(np.bool_)
+    transformed_features, _ = apply_batch_board_symmetry(
+        features,
+        np.zeros(
+            (len(features), POLICY_MOVE_COUNT),
+            dtype=np.float32,
+        ),
+        rotation_counts,
+        should_flip,
+    )
+    return transformed_features
 
 
 def calculate_value_loss(
@@ -39,6 +225,34 @@ def calculate_value_loss(
     )
     return (
         value_loss
+        + policy_preservation_weight * policy_preservation_loss
+    )
+
+
+def calculate_short_auxiliary_value_loss(
+    model: MokaShortValueTrainingNetwork,
+    features: mx.array,
+    targets: mx.array,
+    short_targets: mx.array,
+    sample_weights: mx.array,
+    reference_policy_logits: mx.array,
+    policy_preservation_weight: float,
+    short_value_auxiliary_weight: float,
+) -> mx.array:
+    policy_logits, values, short_values = model(features)
+    weight_sum = mx.sum(sample_weights)
+    value_loss = mx.sum(
+        sample_weights * mx.square(values - targets)
+    ) / weight_sum
+    short_value_loss = mx.sum(
+        sample_weights * mx.square(short_values - short_targets)
+    ) / weight_sum
+    policy_preservation_loss = mx.mean(
+        mx.square(policy_logits - reference_policy_logits)
+    )
+    return (
+        value_loss
+        + short_value_auxiliary_weight * short_value_loss
         + policy_preservation_weight * policy_preservation_loss
     )
 
@@ -222,8 +436,53 @@ def evaluate_pairwise_value(
     return weighted_error_sum / weight_sum
 
 
+def evaluate_short_auxiliary_value(
+    model: MokaShortValueTrainingNetwork,
+    features: np.ndarray,
+    targets: np.ndarray,
+    short_targets: np.ndarray,
+    sample_weights: np.ndarray,
+    batch_size: int,
+) -> tuple[float, float]:
+    value_error_sum = 0.0
+    short_value_error_sum = 0.0
+    weight_sum = 0.0
+
+    for batch_start in range(0, len(features), batch_size):
+        batch_end = batch_start + batch_size
+        _, values, short_values = model(
+            mx.array(features[batch_start:batch_end], dtype=mx.float32)
+        )
+        mx.eval(values, short_values)
+        batch_weights = sample_weights[batch_start:batch_end]
+        value_error_sum += float(
+            np.sum(
+                batch_weights
+                * np.abs(
+                    np.asarray(values) - targets[batch_start:batch_end]
+                )
+            )
+        )
+        short_value_error_sum += float(
+            np.sum(
+                batch_weights
+                * np.abs(
+                    np.asarray(short_values)
+                    - short_targets[batch_start:batch_end]
+                )
+            )
+        )
+        weight_sum += float(np.sum(batch_weights))
+
+    return (
+        value_error_sum / weight_sum,
+        short_value_error_sum / weight_sum,
+    )
+
+
 def train_value_head(
     dataset_path: Path,
+    supplemental_dataset_paths: list[Path],
     initial_checkpoint_path: Path,
     checkpoint_path: Path,
     epoch_count: int,
@@ -234,24 +493,114 @@ def train_value_head(
     should_unfreeze_trunk: bool,
     policy_preservation_weight: float,
     pairwise_ranking_weight: float,
+    outcome_target_weight: float,
+    short_value_target_weight: float,
+    short_value_auxiliary_weight: float,
+    root_search_target_weight: float,
+    use_int8_quantization_aware_training: bool,
+    use_symmetry_augmentation: bool,
+    game_pair_size: int,
 ) -> None:
+    if short_value_auxiliary_weight < 0:
+        raise ValueError(
+            "Short-value auxiliary weight must not be negative."
+        )
+    if short_value_auxiliary_weight > 0 and use_child_targets:
+        raise ValueError(
+            "Short-value auxiliary training does not support child targets."
+        )
+    if short_value_auxiliary_weight > 0 and short_value_target_weight > 0:
+        raise ValueError(
+            "Short value cannot be both an auxiliary and blended target."
+        )
+    if short_value_auxiliary_weight > 0 and pairwise_ranking_weight > 0:
+        raise ValueError(
+            "Short-value auxiliary training does not support ranking loss."
+        )
     dataset = np.load(dataset_path)
     key_prefix = "child_" if use_child_targets else ""
-    features = dataset[f"{key_prefix}features"].astype(np.float32)
-    game_ids = dataset[f"{key_prefix}game_ids"]
-    values = dataset[f"{key_prefix}values"].astype(np.float32)
-    sample_weights = (
-        dataset[f"{key_prefix}weights"].astype(np.float32)
-        if f"{key_prefix}weights" in dataset
-        else np.ones(len(features), dtype=np.float32)
+    features, game_ids, values, sample_weights = load_value_dataset(
+        dataset_path,
+        use_child_targets,
+        outcome_target_weight,
+        short_value_target_weight,
+        root_search_target_weight,
     )
-    game_buckets = game_ids % SPLIT_BUCKET_COUNT
+    game_buckets = create_game_split_buckets(game_ids, game_pair_size)
     validation_indexes = np.flatnonzero(game_buckets == VALIDATION_BUCKET_INDEX)
     test_indexes = np.flatnonzero(game_buckets == TEST_BUCKET_INDEX)
     training_indexes = np.flatnonzero(
         (game_buckets != VALIDATION_BUCKET_INDEX)
         & (game_buckets != TEST_BUCKET_INDEX)
     )
+    training_features = features[training_indexes]
+    training_values = values[training_indexes]
+    short_values = (
+        create_short_value_targets(dataset, key_prefix)
+        if short_value_auxiliary_weight > 0
+        else None
+    )
+    training_short_values = (
+        short_values[training_indexes]
+        if short_values is not None
+        else None
+    )
+    training_sample_weights = sample_weights[training_indexes]
+    for supplemental_dataset_path in supplemental_dataset_paths:
+        (
+            supplemental_features,
+            supplemental_game_ids,
+            supplemental_values,
+            supplemental_sample_weights,
+        ) = load_value_dataset(
+            supplemental_dataset_path,
+            False,
+            outcome_target_weight,
+            short_value_target_weight,
+            root_search_target_weight,
+        )
+        supplemental_game_buckets = create_game_split_buckets(
+            supplemental_game_ids,
+            game_pair_size,
+        )
+        supplemental_training_indexes = np.flatnonzero(
+            (supplemental_game_buckets != VALIDATION_BUCKET_INDEX)
+            & (supplemental_game_buckets != TEST_BUCKET_INDEX)
+        )
+        training_features = np.concatenate(
+            [
+                training_features,
+                supplemental_features[supplemental_training_indexes],
+            ]
+        )
+        training_values = np.concatenate(
+            [
+                training_values,
+                supplemental_values[supplemental_training_indexes],
+            ]
+        )
+        if training_short_values is not None:
+            supplemental_dataset = np.load(supplemental_dataset_path)
+            supplemental_short_values = create_short_value_targets(
+                supplemental_dataset,
+                "",
+            )
+            training_short_values = np.concatenate(
+                [
+                    training_short_values,
+                    supplemental_short_values[
+                        supplemental_training_indexes
+                    ],
+                ]
+            )
+        training_sample_weights = np.concatenate(
+            [
+                training_sample_weights,
+                supplemental_sample_weights[
+                    supplemental_training_indexes
+                ],
+            ]
+        )
     random_generator = np.random.default_rng(random_seed)
     mx.random.seed(random_seed)
     model = create_moka_network_for_checkpoint(
@@ -264,9 +613,29 @@ def train_value_head(
     reference_model.load_weights(str(initial_checkpoint_path))
     reference_model.freeze()
     reference_model.eval()
-    model.freeze()
+    if (
+        short_value_auxiliary_weight > 0
+        and model.__class__ is not MokaGlobalResidualNetwork
+    ):
+        raise ValueError(
+            "Short-value auxiliary training requires a global-residual model."
+        )
+    short_training_model = (
+        MokaShortValueTrainingNetwork(model)
+        if short_value_auxiliary_weight > 0
+        else None
+    )
+    optimization_model = (
+        short_training_model if short_training_model is not None else model
+    )
+    optimization_model.freeze()
 
-    if should_unfreeze_trunk:
+    if short_training_model is not None:
+        short_training_model.base_model.value_convolution.unfreeze()
+        short_training_model.base_model.value_hidden.unfreeze()
+        short_training_model.base_model.value_output.unfreeze()
+        short_training_model.auxiliary_short_value_output.unfreeze()
+    elif should_unfreeze_trunk:
         model.unfreeze()
         model.policy_convolution.freeze()
         model.policy_linear.freeze()
@@ -275,11 +644,97 @@ def train_value_head(
         model.value_hidden.unfreeze()
         model.value_output.unfreeze()
     optimizer = optim.AdamW(learning_rate=learning_rate)
-    loss_and_grad = nn.value_and_grad(model, calculate_value_loss)
-    ranked_loss_and_grad = nn.value_and_grad(
-        model,
-        calculate_ranked_value_loss,
+    quantized_model = (
+        create_moka_network_for_checkpoint(str(initial_checkpoint_path))
+        if use_int8_quantization_aware_training
+        and short_training_model is None
+        else None
     )
+    quantized_short_training_model = (
+        MokaShortValueTrainingNetwork(
+            create_moka_network_for_checkpoint(
+                str(initial_checkpoint_path)
+            )
+        )
+        if use_int8_quantization_aware_training
+        and short_training_model is not None
+        else None
+    )
+    if quantized_model is not None:
+        quantized_model.update(
+            fake_quantize_int8_parameters(model.parameters())
+        )
+        mx.eval(quantized_model.parameters())
+
+        def calculate_quantized_value_loss(
+            parameters: dict,
+            *loss_arguments: object,
+        ) -> mx.array:
+            quantized_model.update(
+                fake_quantize_int8_parameters(parameters)
+            )
+            return calculate_value_loss(
+                quantized_model,
+                *loss_arguments,
+            )
+
+        def calculate_quantized_ranked_value_loss(
+            parameters: dict,
+            *loss_arguments: object,
+        ) -> mx.array:
+            quantized_model.update(
+                fake_quantize_int8_parameters(parameters)
+            )
+            return calculate_ranked_value_loss(
+                quantized_model,
+                *loss_arguments,
+            )
+
+        loss_and_grad = mx.value_and_grad(
+            calculate_quantized_value_loss
+        )
+        ranked_loss_and_grad = mx.value_and_grad(
+            calculate_quantized_ranked_value_loss
+        )
+    elif quantized_short_training_model is not None:
+        quantized_short_training_model.update(
+            fake_quantize_int8_parameters(
+                short_training_model.parameters()
+            )
+        )
+        mx.eval(quantized_short_training_model.parameters())
+
+        def calculate_quantized_short_auxiliary_value_loss(
+            parameters: dict,
+            *loss_arguments: object,
+        ) -> mx.array:
+            quantized_short_training_model.update(
+                fake_quantize_int8_parameters(parameters)
+            )
+            return calculate_short_auxiliary_value_loss(
+                quantized_short_training_model,
+                *loss_arguments,
+            )
+
+        loss_and_grad = mx.value_and_grad(
+            calculate_quantized_short_auxiliary_value_loss
+        )
+        ranked_loss_and_grad = None
+    elif short_training_model is not None:
+        loss_and_grad = nn.value_and_grad(
+            short_training_model,
+            calculate_short_auxiliary_value_loss,
+        )
+        ranked_loss_and_grad = None
+    else:
+        loss_and_grad = nn.value_and_grad(
+            model,
+            calculate_value_loss,
+        )
+        ranked_loss_and_grad = nn.value_and_grad(
+            model,
+            calculate_ranked_value_loss,
+        )
     if pairwise_ranking_weight > 0:
         (
             preferred_indexes,
@@ -290,7 +745,7 @@ def train_value_head(
         ) = create_child_value_pairs(dataset)
         pair_training_indexes = np.flatnonzero(
             ~np.isin(
-                pair_game_ids % SPLIT_BUCKET_COUNT,
+                create_game_split_buckets(pair_game_ids, game_pair_size),
                 [VALIDATION_BUCKET_INDEX, TEST_BUCKET_INDEX],
             )
         )
@@ -299,35 +754,106 @@ def train_value_head(
             f"training_pairs={len(pair_training_indexes):,}"
         )
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    short_training_checkpoint_path = checkpoint_path.with_name(
+        f"{checkpoint_path.stem}-short-auxiliary{checkpoint_path.suffix}"
+    )
     best_validation_error = float("inf")
     best_validation_ranking_error = float("inf")
 
     for epoch_index in range(epoch_count):
-        shuffled_indexes = random_generator.permutation(training_indexes)
+        shuffled_indexes = random_generator.permutation(
+            len(training_features)
+        )
         training_losses: list[float] = []
 
         for batch_start in range(0, len(shuffled_indexes), batch_size):
             batch_indexes = shuffled_indexes[batch_start : batch_start + batch_size]
-            feature_batch = mx.array(features[batch_indexes], dtype=mx.float32)
-            target_batch = mx.array(values[batch_indexes], dtype=mx.float32)
+            batch_features = training_features[batch_indexes]
+            if use_symmetry_augmentation:
+                batch_features = apply_random_value_symmetry(
+                    batch_features,
+                    random_generator,
+                )
+            feature_batch = mx.array(
+                batch_features,
+                dtype=mx.float32,
+            )
+            target_batch = mx.array(
+                training_values[batch_indexes],
+                dtype=mx.float32,
+            )
             weight_batch = mx.array(
-                sample_weights[batch_indexes],
+                training_sample_weights[batch_indexes],
                 dtype=mx.float32,
             )
             reference_policy_logits, _ = reference_model(feature_batch)
             mx.eval(reference_policy_logits)
-            if pairwise_ranking_weight > 0:
+            if short_training_model is not None:
+                short_target_batch = mx.array(
+                    training_short_values[batch_indexes],
+                    dtype=mx.float32,
+                )
+                loss_arguments = (
+                    feature_batch,
+                    target_batch,
+                    short_target_batch,
+                    weight_batch,
+                    reference_policy_logits,
+                    policy_preservation_weight,
+                    short_value_auxiliary_weight,
+                )
+            elif pairwise_ranking_weight > 0:
                 pair_batch_indexes = random_generator.choice(
                     pair_training_indexes,
                     size=len(batch_indexes),
                     replace=len(pair_training_indexes) < len(batch_indexes),
                 )
+                preferred_batch_features = features[
+                    preferred_indexes[pair_batch_indexes]
+                ]
+                alternative_batch_features = features[
+                    alternative_indexes[pair_batch_indexes]
+                ]
+                if use_symmetry_augmentation:
+                    pair_rotation_counts = random_generator.integers(
+                        0,
+                        SYMMETRY_ROTATION_COUNT,
+                        size=len(pair_batch_indexes),
+                    )
+                    pair_should_flip = random_generator.integers(
+                        0,
+                        SYMMETRY_FLIP_OPTION_COUNT,
+                        size=len(pair_batch_indexes),
+                    ).astype(np.bool_)
+                    empty_pair_policies = np.zeros(
+                        (
+                            len(pair_batch_indexes),
+                            POLICY_MOVE_COUNT,
+                        ),
+                        dtype=np.float32,
+                    )
+                    preferred_batch_features, _ = (
+                        apply_batch_board_symmetry(
+                            preferred_batch_features,
+                            empty_pair_policies,
+                            pair_rotation_counts,
+                            pair_should_flip,
+                        )
+                    )
+                    alternative_batch_features, _ = (
+                        apply_batch_board_symmetry(
+                            alternative_batch_features,
+                            empty_pair_policies,
+                            pair_rotation_counts,
+                            pair_should_flip,
+                        )
+                    )
                 preferred_feature_batch = mx.array(
-                    features[preferred_indexes[pair_batch_indexes]],
+                    preferred_batch_features,
                     dtype=mx.float32,
                 )
                 alternative_feature_batch = mx.array(
-                    features[alternative_indexes[pair_batch_indexes]],
+                    alternative_batch_features,
                     dtype=mx.float32,
                 )
                 target_value_gap_batch = mx.array(
@@ -338,8 +864,7 @@ def train_value_head(
                     pair_weights[pair_batch_indexes],
                     dtype=mx.float32,
                 )
-                loss, gradients = ranked_loss_and_grad(
-                    model,
+                loss_arguments = (
                     feature_batch,
                     target_batch,
                     weight_batch,
@@ -352,33 +877,112 @@ def train_value_head(
                     pairwise_ranking_weight,
                 )
             else:
-                loss, gradients = loss_and_grad(
-                    model,
+                loss_arguments = (
                     feature_batch,
                     target_batch,
                     weight_batch,
                     reference_policy_logits,
                     policy_preservation_weight,
                 )
-            optimizer.update(model, gradients)
-            mx.eval(model.parameters(), optimizer.state, loss)
+            loss, gradients = (
+                (
+                    ranked_loss_and_grad(
+                        model.trainable_parameters(),
+                        *loss_arguments,
+                    )
+                    if pairwise_ranking_weight > 0
+                    else loss_and_grad(
+                        model.trainable_parameters(),
+                        *loss_arguments,
+                    )
+                )
+                if quantized_model is not None
+                else (
+                    loss_and_grad(
+                        short_training_model.trainable_parameters(),
+                        *loss_arguments,
+                    )
+                    if quantized_short_training_model is not None
+                    else loss_and_grad(
+                        short_training_model,
+                        *loss_arguments,
+                    )
+                )
+                if short_training_model is not None
+                else (
+                    ranked_loss_and_grad(model, *loss_arguments)
+                    if pairwise_ranking_weight > 0
+                    else loss_and_grad(model, *loss_arguments)
+                )
+            )
+            optimizer.update(optimization_model, gradients)
+            if quantized_model is not None:
+                quantized_model.update(
+                    fake_quantize_int8_parameters(model.parameters())
+                )
+                mx.eval(
+                    model.parameters(),
+                    quantized_model.parameters(),
+                    optimizer.state,
+                    loss,
+                )
+            elif quantized_short_training_model is not None:
+                quantized_short_training_model.update(
+                    fake_quantize_int8_parameters(
+                        short_training_model.parameters()
+                    )
+                )
+                mx.eval(
+                    short_training_model.parameters(),
+                    quantized_short_training_model.parameters(),
+                    optimizer.state,
+                    loss,
+                )
+            else:
+                mx.eval(
+                    optimization_model.parameters(),
+                    optimizer.state,
+                    loss,
+                )
             training_losses.append(float(loss.item()))
 
-        validation_error = evaluate_value(
-            model,
-            features[validation_indexes],
-            values[validation_indexes],
-            sample_weights[validation_indexes],
-            batch_size,
-        )
+        if short_training_model is not None:
+            validation_error, validation_short_error = (
+                evaluate_short_auxiliary_value(
+                    (
+                        quantized_short_training_model
+                        if quantized_short_training_model is not None
+                        else short_training_model
+                    ),
+                    features[validation_indexes],
+                    values[validation_indexes],
+                    short_values[validation_indexes],
+                    sample_weights[validation_indexes],
+                    batch_size,
+                )
+            )
+        else:
+            validation_error = evaluate_value(
+                quantized_model if quantized_model is not None else model,
+                features[validation_indexes],
+                values[validation_indexes],
+                sample_weights[validation_indexes],
+                batch_size,
+            )
+            validation_short_error = None
         progress = (
             f"epoch {epoch_index + 1:02d} "
             f"train={np.mean(training_losses):.4f} "
             f"validation_mae={validation_error:.4f}"
         )
+        if validation_short_error is not None:
+            progress += (
+                f" validation_short_mae={validation_short_error:.4f}"
+            )
         if pairwise_ranking_weight > 0:
             pair_validation_indexes = np.flatnonzero(
-                pair_game_ids % SPLIT_BUCKET_COUNT == VALIDATION_BUCKET_INDEX
+                create_game_split_buckets(pair_game_ids, game_pair_size)
+                == VALIDATION_BUCKET_INDEX
             )
             validation_ranking_error = evaluate_pairwise_value(
                 model,
@@ -403,20 +1007,58 @@ def train_value_head(
         if did_improve:
             best_validation_error = validation_error
             best_validation_ranking_error = validation_ranking_error
-            model.save_weights(str(checkpoint_path))
+            if short_training_model is not None:
+                short_training_model.save_weights(
+                    str(short_training_checkpoint_path)
+                )
+            else:
+                model.save_weights(str(checkpoint_path))
 
-    model.load_weights(str(checkpoint_path))
-    test_error = evaluate_value(
-        model,
-        features[test_indexes],
-        values[test_indexes],
-        sample_weights[test_indexes],
-        batch_size,
-    )
-    print(f"test_mae={test_error:.4f}")
+    if short_training_model is not None:
+        short_training_model.load_weights(
+            str(short_training_checkpoint_path)
+        )
+        if quantized_short_training_model is not None:
+            quantized_short_training_model.update(
+                fake_quantize_int8_parameters(
+                    short_training_model.parameters()
+                )
+            )
+        test_error, test_short_error = evaluate_short_auxiliary_value(
+            (
+                quantized_short_training_model
+                if quantized_short_training_model is not None
+                else short_training_model
+            ),
+            features[test_indexes],
+            values[test_indexes],
+            short_values[test_indexes],
+            sample_weights[test_indexes],
+            batch_size,
+        )
+        short_training_model.base_model.save_weights(str(checkpoint_path))
+        print(
+            f"test_mae={test_error:.4f} "
+            f"test_short_mae={test_short_error:.4f}"
+        )
+    else:
+        model.load_weights(str(checkpoint_path))
+        if quantized_model is not None:
+            quantized_model.update(
+                fake_quantize_int8_parameters(model.parameters())
+            )
+        test_error = evaluate_value(
+            quantized_model if quantized_model is not None else model,
+            features[test_indexes],
+            values[test_indexes],
+            sample_weights[test_indexes],
+            batch_size,
+        )
+        print(f"test_mae={test_error:.4f}")
     if pairwise_ranking_weight > 0:
         pair_test_indexes = np.flatnonzero(
-            pair_game_ids % SPLIT_BUCKET_COUNT == TEST_BUCKET_INDEX
+            create_game_split_buckets(pair_game_ids, game_pair_size)
+            == TEST_BUCKET_INDEX
         )
         test_ranking_error = evaluate_pairwise_value(
             model,
@@ -436,6 +1078,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--data", required=True, type=Path)
     argument_parser.add_argument("--initial-checkpoint", required=True, type=Path)
     argument_parser.add_argument("--checkpoint", required=True, type=Path)
+    argument_parser.add_argument(
+        "--supplemental-data",
+        action="append",
+        default=[],
+        type=Path,
+    )
     argument_parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCH_COUNT)
     argument_parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     argument_parser.add_argument(
@@ -456,6 +1104,39 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=0,
     )
+    argument_parser.add_argument(
+        "--outcome-target-weight",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--short-value-target-weight",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--short-value-auxiliary-weight",
+        type=float,
+        default=SHORT_VALUE_AUXILIARY_LOSS_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--root-search-target-weight",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--int8-quantization-aware",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--symmetry-augmentation",
+        action="store_true",
+    )
+    argument_parser.add_argument(
+        "--game-pair-size",
+        type=int,
+        default=DEFAULT_GAME_PAIR_SIZE,
+    )
     return argument_parser
 
 
@@ -463,6 +1144,7 @@ def main() -> None:
     arguments = create_argument_parser().parse_args()
     train_value_head(
         arguments.data,
+        arguments.supplemental_data,
         arguments.initial_checkpoint,
         arguments.checkpoint,
         arguments.epochs,
@@ -473,6 +1155,13 @@ def main() -> None:
         arguments.unfreeze_trunk,
         arguments.policy_preservation_weight,
         arguments.pairwise_ranking_weight,
+        arguments.outcome_target_weight,
+        arguments.short_value_target_weight,
+        arguments.short_value_auxiliary_weight,
+        arguments.root_search_target_weight,
+        arguments.int8_quantization_aware,
+        arguments.symmetry_augmentation,
+        arguments.game_pair_size,
     )
 
 

@@ -1,19 +1,23 @@
 import unittest
+from pathlib import Path
 
 import numpy as np
 
 from go_model.config import BOARD_AREA, KATAGO_SIMPLE_AREA_RULES
-from go_model.board import GameState
+from go_model.board import GameState, play_move
 from go_model.search_generate import (
     convert_parent_value_to_child,
     coordinate_to_move,
     create_analysis_query,
     extract_analysis_targets,
     extract_auxiliary_targets,
+    flatten_move_histories,
     get_eligible_analysis_turns,
     is_moka_turn,
     move_to_coordinate,
+    reconstruct_game_states,
     select_analysis_turns,
+    validate_optimistic_policy_teacher,
     validate_reanalysis_modes,
 )
 
@@ -61,20 +65,38 @@ class SearchGenerationTests(unittest.TestCase):
 
         self.assertTrue(query["includeOwnership"])
 
-    def test_auxiliary_targets_preserve_board_order_and_score(self) -> None:
+    def test_auxiliary_targets_preserve_go_value_signals(self) -> None:
         ownership = np.linspace(-1, 1, BOARD_AREA, dtype=np.float32)
-        extracted_ownership, extracted_score = extract_auxiliary_targets(
+        auxiliary_targets = extract_auxiliary_targets(
             {
                 "ownership": ownership.tolist(),
-                "rootInfo": {"scoreLead": 12.5},
+                "rootInfo": {
+                    "scoreLead": 12.5,
+                    "scoreStdev": 4.25,
+                    "rawWinrate": 0.625,
+                    "rawLead": 10.5,
+                    "rawScoreSelfplay": 11.75,
+                    "rawScoreSelfplayStdev": 5.5,
+                    "rawStWrError": 0.125,
+                    "rawStScoreError": 1.75,
+                    "rawVarTimeLeft": 8.5,
+                },
             }
         )
 
         np.testing.assert_allclose(
-            extracted_ownership,
+            auxiliary_targets.ownership,
             ownership.reshape(9, 9),
         )
-        self.assertEqual(extracted_score, 12.5)
+        self.assertEqual(auxiliary_targets.score, 12.5)
+        self.assertEqual(auxiliary_targets.score_stdev, 4.25)
+        self.assertEqual(auxiliary_targets.raw_value, 0.25)
+        self.assertEqual(auxiliary_targets.raw_score_lead, 10.5)
+        self.assertEqual(auxiliary_targets.raw_score_selfplay, 11.75)
+        self.assertEqual(auxiliary_targets.raw_score_selfplay_stdev, 5.5)
+        self.assertEqual(auxiliary_targets.short_winrate_error, 0.125)
+        self.assertEqual(auxiliary_targets.short_score_error, 1.75)
+        self.assertEqual(auxiliary_targets.variance_time_left, 8.5)
 
     def test_analysis_targets_normalize_visits_and_child_values(self) -> None:
         targets = extract_analysis_targets(
@@ -138,6 +160,41 @@ class SearchGenerationTests(unittest.TestCase):
             -0.75,
         )
 
+    def test_move_histories_are_stored_as_ragged_arrays(self) -> None:
+        first_state = GameState(move_history=[0, 1])
+        second_state = GameState(move_history=[2])
+
+        moves, offsets = flatten_move_histories([first_state, second_state])
+
+        np.testing.assert_array_equal(moves, [0, 1, 2])
+        np.testing.assert_array_equal(offsets, [0, 2, 3])
+
+    def test_move_histories_reconstruct_game_states(self) -> None:
+        first_state = play_move(GameState(), 0)
+        self.assertIsNotNone(first_state)
+        if first_state is None:
+            return
+        second_state = play_move(first_state, 1)
+        self.assertIsNotNone(second_state)
+        if second_state is None:
+            return
+        moves, offsets = flatten_move_histories([first_state, second_state])
+
+        reconstructed_states = reconstruct_game_states(moves, offsets)
+
+        np.testing.assert_array_equal(
+            reconstructed_states[0].board,
+            first_state.board,
+        )
+        np.testing.assert_array_equal(
+            reconstructed_states[1].board,
+            second_state.board,
+        )
+        self.assertEqual(
+            reconstructed_states[1].move_history,
+            second_state.move_history,
+        )
+
     def test_moka_turn_alternates_with_game_color(self) -> None:
         black_turn = GameState(next_color=1)
         white_turn = GameState(next_color=-1)
@@ -182,6 +239,15 @@ class SearchGenerationTests(unittest.TestCase):
             validate_reanalysis_modes(True, True, True)
 
         validate_reanalysis_modes(True, False, True)
+
+    def test_optimistic_policy_teacher_paths_must_be_paired(self) -> None:
+        validate_optimistic_policy_teacher(None, None)
+
+        with self.assertRaises(ValueError):
+            validate_optimistic_policy_teacher(Path("teacher.ckpt"), None)
+
+        with self.assertRaises(ValueError):
+            validate_optimistic_policy_teacher(None, Path("katago"))
 
 
 if __name__ == "__main__":

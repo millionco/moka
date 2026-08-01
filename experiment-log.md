@@ -5325,3 +5325,1646 @@ The candidate improves both independent blocks, adds six Black and seven White w
 The promoted exact checkpoint is `moka-global-soup-exact-q50-int8-roundtrip.safetensors`, with SHA-256 `90db3d02bb1fe3f850c32b6c4b5b864f049220d1e05d128c4efd686dd5b0d954`. The browser binary remains 113,648 bytes and is 100,653 bytes under deterministic gzip. Its SHA-256 is `35c1e51cc9518a21e2f81cded7f69f41d22c80ca05522ed5e4056cb26d9ed053`; the manifest SHA-256 is `00927862de6c29749124b3257b6618156c07b930ba624e010601b90434c1340e`.
 
 The candidate browser runtime returned finite policy and value outputs in the isolated playtest. The checkpoint and browser artifact are promoted. The Million website remains untouched.
+
+## 2026-07-30 — Stronger 9×9 value supervision and 128-visit search
+
+### Strong teacher and outcome corpus
+
+The official `kata9x9-b18c384nbt-20231025` checkpoint was added as an offline research teacher. The raw training checkpoint is 231,320,911 bytes with SHA-256 `95bc4d9c60981c381bc78d09600cdf1cb680ea933c094fa44ecec9b7a3239813`; the corresponding compressed KataGo engine network is 93 MB with SHA-256 `a1298ce1adc1dad7bd868ca962b2384cc8388ed373a00e6bae1114fa6f9e2d61`. A smoke evaluation on Apple Silicon produced finite policy, long-value, short-value, score, ownership, and attention outputs. Neither teacher artifact is part of Moka inference or the browser payload.
+
+A fresh corpus used the exact promoted Moka with 32-evaluation search against greedy b6c96. It varied KataGo-generated prefixes and colors across 256 games, then attached the b18 teacher's long- and short-horizon values to every position. The result contains 16,028 positions, averages 62.6 positions per game, and has SHA-256 `d5cbb35aef18b5ea40370959420ae08caa91792dbdabe97a135dcef27573b34d`. The outcome collector now records move counts and optional short-horizon teacher values.
+
+### Existing value-head training
+
+The value trainer now supports supplemental corpora, long/short/outcome target mixtures, random board symmetries, and exact INT8-aware optimization. The policy and trunk can remain frozen, so the experiment changes only the existing 5,315-parameter value head and adds no model bytes.
+
+Outcome-heavy candidates improved their own held-out trajectory positions but regressed the untouched 4,720,000 b18 block. A conservative b18 calibration candidate passed pointwise arbitration after an exact value-only merge:
+
+| Metric                       | Control | Candidate |
+| :--------------------------- | ------: | --------: |
+| Symmetry-consensus value MAE |  0.4240 |    0.4060 |
+| Value-sign agreement         |   86.5% |     85.7% |
+| Mean symmetry value spread   |  0.0956 |    0.0978 |
+| Changed non-value parameters |       0 |         0 |
+
+On 20 paired games from opening offset 5,020,000, control scored nine wins and the candidate scored seven. Better pointwise calibration did not improve search decisions, so every value-head candidate is rejected. The promoted weights remain unchanged.
+
+### Search normalization rejection
+
+Full Q-range normalization initially scored 10/20 versus control's 9/20. Three fresh 40-game blocks reversed that result:
+
+| Opening offset | Control wins | Normalized wins |
+| -------------: | -----------: | --------------: |
+|      5,030,000 |           22 |              17 |
+|      5,040,000 |           20 |              16 |
+|      5,050,000 |           21 |              13 |
+|      **Total** |       **63** |          **46** |
+
+All games completed without caps. Q normalization is rejected.
+
+### MCTS visit scaling
+
+The same promoted checkpoint was tested at 64, 96, and 128 visits on opening offset 5,060,000. Scores increased monotonically from 17/40 to 18/40 to 20/40. Four additional paired blocks then compared 64 and 128 directly.
+
+| Opening offset | 64 visits | 128 visits | 64 Black / White | 128 Black / White | Caps |
+| -------------: | --------: | ---------: | :--------------- | :---------------- | ---: |
+|      5,060,000 |        17 |         20 | 9 / 8            | 9 / 11            |    0 |
+|      5,070,000 |        15 |         19 | 9 / 6            | 10 / 9            |    0 |
+|      5,080,000 |        11 |         22 | 6 / 5            | 12 / 10           |    0 |
+|      5,090,000 |        21 |         19 | 10 / 11          | 9 / 10            |    0 |
+|      5,100,000 |        41 |         43 | 25 / 16          | 25 / 18           |    0 |
+|      **Total** |   **105** |    **123** | **59 / 46**      | **65 / 58**       |    0 |
+
+The 128-visit player wins 18 more of 260 matched games, improving from 40.4% to 47.3%. It gains as both colors and introduces no cap. Aggregate local runtime rises from 891.9 to 1,668.9 seconds, or 1.87×. This is an honest test-time-compute gain: weights, openings, rules, and opponent are identical, and KataGo is never queried by Moka search.
+
+The accepted arena search budget is now 128 visits. This is a strong-search setting rather than a free browser-performance claim; latency-sensitive clients may continue using a smaller budget.
+
+## 2026-07-31 — Variance-scaled PUCT rejection
+
+### Hypothesis
+
+KataGo scales cPUCT using empirical search-value variance so volatile nodes receive more exploration and stable nodes receive less. A research implementation accumulated the first and second moments of backed-up values at every MCTS node, mixed the empirical variance with a four-visit prior, and bounded the exploration multiplier from 0.5 to 2.0. Disabled mode reproduced the accepted search exactly and added no model inference.
+
+### Initial calibration
+
+The first reference standard deviation was 0.50. A 20-game screen at opening offset 5,110,000 favored full variance scaling by 13 wins to control's 10, while weights 0.25 and 0.50 each tied control. Three frozen 40-game confirmation blocks reversed the result:
+
+| Opening offset | Control wins | Variance wins |
+| -------------: | -----------: | ------------: |
+|      5,120,000 |           23 |            23 |
+|      5,130,000 |           23 |            18 |
+|      5,140,000 |           22 |            17 |
+|      **Total** |       **68** |        **58** |
+
+A diagnostic over 3,974 visited nodes explained the failure. Their backed-up value standard deviation had median 0.115 and mean 0.120. The 0.50 reference therefore reduced exploration at every measured node; the median multiplier was 0.745 and none exceeded 1.0.
+
+### Measured calibration
+
+Changing the reference deviation to 0.125 produced a balanced multiplier distribution: median 0.960, 43.4% of nodes above 1.0, and 56.6% below. A fresh screen at opening offset 5,160,000 scored 12, 12, 13, and 6 wins for variance weights 0, 0.25, 0.50, and 1.0. Weight 0.50 advanced unchanged.
+
+Three new 40-game blocks again rejected the candidate:
+
+| Opening offset | Control wins | Variance wins | Control caps | Variance caps |
+| -------------: | -----------: | ------------: | -----------: | ------------: |
+|      5,170,000 |           20 |            21 |            0 |             1 |
+|      5,180,000 |           27 |            20 |            0 |             0 |
+|      5,190,000 |           18 |            17 |            0 |             1 |
+|      **Total** |       **65** |        **58** |        **0** |         **2** |
+
+The measured calibration loses seven games and introduces two repetition caps. Variance-scaled PUCT is rejected and its implementation is removed. The accepted player remains the unmodified 128-visit search.
+
+## 2026-07-31 — Extended visit scaling rejection
+
+### Screen
+
+The promoted checkpoint was screened at 128, 192, and 256 fixed visits on 20 fresh paired games from opening offset 5,200,000. Wins increased monotonically from 7 to 12 to 14, with zero caps. Runtime increased from 105.6 to 151.0 to 205.9 seconds. The unique 256-visit leader advanced unchanged.
+
+### Frozen confirmations
+
+Two disjoint three-block confirmations compared 128 and 256 visits with identical checkpoints, openings, colors, rules, opponent, and search settings:
+
+| Opening offset | 128 visits | 256 visits | 128 Black / White | 256 Black / White | Caps |
+| -------------: | ---------: | ---------: | :---------------- | :---------------- | ---: |
+|      5,210,000 |         26 |         28 | 16 / 10           | 14 / 14           |    0 |
+|      5,220,000 |         22 |         17 | 11 / 11           | 9 / 8             |    0 |
+|      5,230,000 |         18 |         23 | 7 / 11            | 11 / 12           |    0 |
+|  **First set** |     **66** |     **68** | **34 / 32**       | **34 / 34**       |    0 |
+|      5,240,000 |         18 |         22 | 9 / 9             | 10 / 12           |    0 |
+|      5,250,000 |         21 |         22 | 10 / 11           | 13 / 9            |    0 |
+|      5,260,000 |         25 |         18 | 11 / 14           | 8 / 10            |    0 |
+| **Second set** |     **64** |     **62** | **30 / 34**       | **31 / 31**       |    0 |
+|      **Total** |    **130** |    **130** | **64 / 66**       | **65 / 65**       |    0 |
+
+The first confirmation retained a two-game edge, but the second reversed by two games. The frozen aggregate is an exact 130–130 tie, while 256 visits costs about 1.7 times as much local runtime. The strong 20-game screen was selection noise. Fixed 256 visits are rejected for both the default and a maximum-strength tier; the accepted budget remains 128 visits.
+
+## 2026-07-31 — Root lower-confidence-bound rejection
+
+### Hypothesis and implementation
+
+KataGo can adjust final root move selection when a sufficiently visited alternative has a materially better lower confidence bound than the raw visit leader. A research implementation tracked the first and second moments of backed-up values, added a bounded low-sample variance prior, required at least 15% of the leading visit count, and applied the confidence adjustment only after search. It added no model inference, teacher access, rule heuristic, or payload. Zero standard deviations reproduced ordinary maximum-visit selection.
+
+### Screen
+
+On 20 fresh paired games from opening offset 5,270,000:
+
+| LCB standard deviations | Wins | Black | White | Caps | Runtime |
+| ----------------------: | ---: | ----: | ----: | ---: | ------: |
+|                       0 |    9 |     5 |     4 |    1 |  165.5s |
+|                       1 |    5 |     3 |     2 |    0 |  170.1s |
+|                       2 |   10 |     6 |     4 |    0 |  160.6s |
+|                       4 |   12 |     6 |     6 |    0 |  158.2s |
+|                       5 |   10 |     4 |     6 |    0 |  159.7s |
+
+Four standard deviations was the unique win leader and advanced unchanged.
+
+### Confirmation
+
+Three untouched 40-game blocks produced:
+
+| Opening offset | Control wins | LCB wins | Control Black / White | LCB Black / White | Control / LCB caps | Control / LCB runtime |
+| -------------: | -----------: | -------: | :-------------------- | :---------------- | -----------------: | --------------------: |
+|      5,280,000 |           18 |       19 | 13 / 5                | 10 / 9            |              0 / 0 |       319.4s / 330.4s |
+|      5,290,000 |           21 |       18 | 12 / 9                | 10 / 8            |              0 / 0 |       322.1s / 332.4s |
+|      5,300,000 |           21 |       23 | 8 / 13                | 12 / 11           |              0 / 0 |       339.9s / 335.3s |
+|      **Total** |       **60** |   **60** | **33 / 27**           | **32 / 28**       |          **0 / 0** |   **981.4s / 998.1s** |
+
+The one-game first-block gain reversed in the second block and recovered only to an exact aggregate tie. The screen improvement did not replicate, while confirmation runtime increased 1.7%. Root LCB selection is rejected and its implementation is removed. The accepted player remains ordinary maximum-visit selection at 128 visits.
+
+## 2026-07-31 — Deterministic wide-root prior rejection
+
+KataGo's wide-root exploration can reduce policy blind spots. A deterministic research variant mixed uniform mass over legal moves into Moka's symmetry-aggregated real-root policy while leaving descendant priors unchanged. It added no inference, randomness, teacher access, or payload, and zero weight reproduced the accepted search.
+
+On 20 fresh paired games from opening offset 5,310,000:
+
+| Uniform root mass | Wins | Black | White | Caps | Runtime |
+| ----------------: | ---: | ----: | ----: | ---: | ------: |
+|              0.00 |    9 |     6 |     3 |    0 |  139.9s |
+|              0.01 |    9 |     6 |     3 |    0 |  139.8s |
+|              0.02 |   10 |     7 |     3 |    0 |  141.5s |
+|              0.04 |   10 |     7 |     3 |    0 |  140.2s |
+|              0.08 |    7 |     4 |     3 |    0 |  138.1s |
+
+Weights 0.02 and 0.04 tied one game above control with identical color splits, while the broader 0.08 intervention regressed by two games. There was no unique candidate and no cap or runtime improvement. The family is rejected without confirmation, and its implementation is removed.
+
+## 2026-07-31 — Subtree value-bias rejection
+
+### Hypothesis
+
+KataGo's subtree value-bias table groups positions by the player, previous two moves, ko, and a 5×5 local pattern. During search it measures the difference between a node's direct network value and its deeper child value, then reuses a fraction of that local correction at matching nodes. The published defaults use a 0.45 correction factor, a 0.85 child-visit exponent, and retain 20% of evidence from discarded branches.
+
+The research implementation reproduced those settings, updated each node's table contribution by replacement, and recomputed backed-up node values from the corrected direct evaluation and child statistics. It added no model parameters, neural evaluations, browser bytes, handcrafted score estimate, or KataGo query. Zero factor preserved the accepted search path.
+
+### Diagnostic
+
+One game formed 1,626 buckets and found prior evidence on 91.0% of 24,223 lookups. The mean absolute correction was 0.0281 on the −1 to 1 value scale, the maximum was 0.4509, and 162 corrected values saturated at a bound.
+
+### Frozen screen
+
+The published 0.45 factor and 0.85 exponent were screened unchanged against the zero-factor control on 20 paired games from fresh opening offset 5,320,000:
+
+| Player             | Wins | Black | White | Caps | Runtime |
+| :----------------- | ---: | ----: | ----: | ---: | ------: |
+| Control            |   12 |     5 |     7 |    0 |  149.3s |
+| Subtree value bias |   10 |     5 |     5 |    0 |  156.6s |
+
+Across the candidate screen, 32,305 buckets served 522,282 lookups with a 91.5% hit rate. The mean absolute correction grew to 0.0861, the maximum reached 0.8459, and 2,465 values saturated.
+
+The candidate loses two games and costs 4.9% more runtime. Its high table hit rate is largely within the same shallow search tree, where sparse child evidence can feed back into the direct value too aggressively. Subtree value bias is rejected without confirmation and its implementation is removed. The accepted player remains the unmodified 128-visit search.
+
+## 2026-07-31 — Bounded ladder-prior rejection
+
+### Hypothesis and implementation
+
+A bounded legal-move ladder reader returned only proven capture, proven escape, or unknown. Attacker branches played target-group liberties; defender branches extended the group or captured adjacent chasing stones in atari. Reads stopped when the target was captured, reached three liberties, repeated a position, or exhausted a 128-node budget. Tests covered a staircase capture, distant ladder breaker, immediate capture, simple ko, and budget exhaustion.
+
+The MCTS experiment considered only groups with at least two stones and at most two liberties. It multiplied prior by `exp(1)` for a move proven to capture an opponent group or save a threatened friendly group. It did not alter value, prune other legal moves, query KataGo, add model parameters, or add browser bytes. Zero bonus reproduced the accepted player.
+
+### Frozen screen
+
+A one-game diagnostic measured roughly 7–11% runtime overhead. The factor was frozen before arena scoring and screened on 20 paired games from fresh opening offset 5,340,000:
+
+| Player       | Wins | Black | White | Caps | Resignations | Runtime |
+| :----------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control      |   11 |     8 |     3 |    0 |            1 |  118.8s |
+| Ladder prior |   10 |     6 |     4 |    0 |            3 |  132.7s |
+
+The exact local reader is mechanically correct on its tactical fixtures, but a proven local capture or escape is not necessarily the globally best move. The prior intervention loses one game, shifts two wins from Black to White, triples resignations, and costs 11.7% more runtime. It is rejected without confirmation and removed. The accepted player remains the unmodified 128-visit search.
+
+## 2026-07-31 — Learned uncertainty-weighted playout tie
+
+### Hypothesis and offline gate
+
+KataGo predicts short-horizon value and its expected short-term error, then weights MCTS playouts inversely to predicted uncertainty. A research Moka variant added two frozen-feature 32-to-1 outputs: one for the b18 teacher's short value and one for squared short-value error. The 66 new parameters left every incumbent policy, trunk, and value tensor byte-identical.
+
+Training used the 16,028-position promoted-Moka outcome corpus. The short-value output was fitted first; it was then frozen while the error output learned its squared residual. On the held-out test split, predicted uncertainty correlated 0.347 with absolute short-value error. The short-value MAE was 0.4680 and uncertainty calibration MAE was 0.4245.
+
+The KataGo playout formula is `coefficient / (uncertainty^exponent + coefficient / maximumWeight)`. Exponent 1 and maximum weight 8 were retained. Moka's uncertainty scale had held-out median 0.656, so the coefficient was calibrated offline to 0.75, making the median playout weight approximately one without using arena results.
+
+### Frozen screen
+
+The candidate was screened unchanged on 20 paired games from fresh opening offset 5,360,000:
+
+| Player               | Wins | Black | White | Caps | Resignations | Runtime |
+| :------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control              |    8 |     4 |     4 |    0 |            0 |  123.6s |
+| Uncertainty-weighted |    8 |     4 |     4 |    0 |            3 |  130.8s |
+
+The learned weights alter trajectories and pass behavior but produce an exact win and color tie, add three resignations, and cost 5.8% more runtime. The 66-parameter linear head is not discriminative enough to improve search allocation. It is rejected without confirmation and removed. The promoted checkpoint, browser artifact, and accepted 128-visit player remain unchanged.
+
+## 2026-07-31 — Opening-heavy visit schedule rejection
+
+### Hypothesis and calibration
+
+Fixed 256-visit search tied the accepted 128-visit player across 260 matched games, but that aggregate did not show whether extra compute helps in one phase and hurts in another. A phase schedule used 256 visits only before a fixed move-count cutoff, then returned to 128 visits for the rest of the game. It changed no model weights, search formula, opponent access, rules, or browser bytes.
+
+On 20 fresh paired games from opening offset 5,370,000, fixed 128 visits scored six wins. Using 256 visits through move 19 scored 11 wins, while using 256 visits through move 29 scored 12. Every configuration had zero caps. The move-30 cutoff was frozen as the unique screen leader without testing more cutoffs.
+
+### Fresh confirmation
+
+The frozen schedule and control then played 40 untouched matched games from opening offset 5,380,000:
+
+| Player                     | Wins | Black | White | Caps | Runtime |
+| :------------------------- | ---: | ----: | ----: | ---: | ------: |
+| Fixed 128 visits           |   23 |    14 |     9 |    0 |  224.1s |
+| 256 visits through move 29 |   21 |    11 |    10 |    0 |  315.8s |
+
+The six-game screen gain reversed to a two-game loss, with the candidate losing three Black wins and gaining one White win. Runtime increased 40.9%. Opening-heavy compute is rejected without further confirmation. The accepted player remains fixed 128-visit PUCT.
+
+## 2026-07-31 — MC–RAVE rejection
+
+### Hypothesis and implementation
+
+[MC–RAVE](https://www.davidsilver.uk/wp-content/uploads/2020/03/mcrave-1.pdf) was developed specifically for low-simulation Go search. Its all-moves-as-first estimate shares the outcome of later same-player moves across sibling actions, then decays that biased estimate toward ordinary Monte Carlo values as a node receives more simulations.
+
+The research implementation followed the paper's hand-selected schedule, `sqrt(k / (3N + k))`. It updated only later same-color moves, counted a repeated intersection once per path, and ignored moves unavailable among a node's retained legal children. Because Moka bootstraps from a neural leaf rather than playing a random rollout to termination, AMAF used only moves inside the selected tree path. It added no neural evaluation, model parameter, browser byte, rule estimate, or KataGo query. Equivalence zero reproduced the control's two-game wins, colors, passes, caps, and runtime exactly.
+
+### Frozen calibration
+
+The exact promoted checkpoint and accepted 128-visit search were held fixed on 20 fresh games from opening offset 5,390,000. The predeclared equivalence values covered a light blend, a middle blend, and the paper's effective range:
+
+| RAVE equivalence | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| ---------------: | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+|                0 |   10 |     6 |     4 |    0 |     41 |            0 |  112.1s |
+|               10 |   10 |     6 |     4 |    0 |     36 |            2 |  123.5s |
+|              100 |    5 |     3 |     2 |    0 |     90 |            4 |  120.3s |
+|            1,000 |    0 |     0 |     0 |    0 |    175 |            8 |  125.9s |
+
+The light blend ties control while costing 10.2% more runtime and adding two resignations. Stronger blends collapse monotonically, with the paper-scale setting losing every game. Short neural tree paths do not provide the broad, approximately order-independent terminal rollouts that made AMAF useful in classical Go engines; later moves instead become a strongly biased value signal. MC–RAVE is rejected without confirmation, and its node statistics, selection path, CLI, constants, and tests are removed. The accepted player remains ordinary fixed 128-visit MCTS.
+
+## 2026-07-31 — 128-visit exploration retuning
+
+The accepted PUCT exploration coefficient 1.75 was calibrated at the older 64-visit budget. A fresh screen retested the policy-versus-search allocation after the default increased to 128 visits. Every run used the exact promoted checkpoint, identical 20-game block at opening offset 5,390,000, full symmetry evaluation, opponent width four, and zero caps.
+
+| Exploration | Wins | Black | White | Resignations | Runtime |
+| ----------: | ---: | ----: | ----: | -----------: | ------: |
+|        1.50 |    9 |     4 |     5 |            2 |  112.8s |
+|        1.75 |   10 |     6 |     4 |            0 |  111.0s |
+|        2.00 |    9 |     4 |     5 |            0 |  110.0s |
+|        2.25 |   10 |     5 |     5 |            1 |  109.1s |
+
+The upper endpoint tied the incumbent with a different color split, while both interior challengers lost one game. There is no unique leader to confirm. Exploration 1.75 remains accepted.
+
+## 2026-07-31 — 128-visit value-weight retuning
+
+The accepted PUCT value weight 1.25 also predated the increase from 64 to 128 visits. A screen held the checkpoint, 128-visit budget, exploration 1.75, full symmetry evaluation, opponent width four, openings, and rules fixed while varying only the value contribution:
+
+| Value weight | Wins | Black | White | Caps | Resignations | Runtime |
+| -----------: | ---: | ----: | ----: | ---: | -----------: | ------: |
+|        1.000 |   11 |     6 |     5 |    0 |            1 |  120.9s |
+|        1.125 |    9 |     5 |     4 |    0 |            0 |  118.5s |
+|        1.250 |    8 |     4 |     4 |    0 |            4 |  118.4s |
+|        1.500 |   12 |     7 |     5 |    0 |            2 |  113.3s |
+
+Weight 1.5 was frozen as the unique leader and compared with 1.25 on 40 untouched matched games from opening offset 5,410,000:
+
+| Value weight | Wins | Black | White | Caps | Runtime |
+| -----------: | ---: | ----: | ----: | ---: | ------: |
+|         1.25 |   15 |     5 |    10 |    0 |  218.3s |
+|         1.50 |   14 |     5 |     9 |    0 |  231.4s |
+
+The four-game screen gain reversed to a one-game loss entirely as White, and runtime increased 6.0%. Value weight 1.5 is rejected without a second confirmation. The accepted value weight remains 1.25.
+
+## 2026-07-31 — Current-player 128-visit search distillation rejection
+
+### Hypothesis and corpus
+
+The promoted global-context checkpoint had never been distilled directly from its own accepted 128-visit search. A fresh corpus used the exact promoted INT8 artifact against b6c96, recorded only Moka turns, and trained only the existing global residual adapters. This preserved the architecture, parameter count, browser payload, policy and value heads, and every non-adapter tensor.
+
+The frozen collection used 128 games from opening offset 5,400,000, 128 simulations, opponent width four, full root symmetry evaluation, exploration 1.75, FPU reduction 0.5, and a 0.75 search-policy blend. It produced 4,319 positions: 3,441 training, 417 validation, and 461 test positions. The compressed dataset is 748,010 bytes with SHA-256 `6d000bba283dc48a42864abd6aa0a571f64af42dad04e50548abcfbaa4b3118e`.
+
+### Adapter-only candidates
+
+Three exact-quantization-aware continuations used one epoch, batch size 256, seed 430, policy preservation weight 0.25, and learning rates `3e-6`, `1e-5`, and `3e-5`. Exact INT8 round trips changed the same 12 global pooling and global bias adapter tensors while leaving all 108 other tensors byte-identical. Every exact artifact remained 434,455 bytes.
+
+Held-out metrics are reported as loss / move accuracy / value MAE:
+
+| Exact checkpoint | Fresh 128-visit test       | Independent on-policy test | Independent risk test      |
+| :--------------- | :------------------------- | :------------------------- | :------------------------- |
+| Incumbent        | 2.01637 / 0.6746 / 0.44007 | 3.02377 / 0.3922 / 0.42449 | 2.24958 / 0.7556 / 0.11743 |
+| LR `3e-6`        | 2.01352 / 0.6725 / 0.43902 | 3.02462 / 0.3922 / 0.42477 | 2.24975 / 0.7556 / 0.12068 |
+| LR `1e-5`        | 2.00825 / 0.6746 / 0.43702 | 3.02782 / 0.3922 / 0.42575 | 2.25082 / 0.7600 / 0.12874 |
+| LR `3e-5`        | 2.00038 / 0.6746 / 0.43322 | 3.03798 / 0.3922 / 0.42787 | 2.25203 / 0.7644 / 0.13380 |
+
+The fresh search target improved monotonically, while stronger updates increasingly regressed independent value accuracy. All three remained mechanically valid and advanced to one matched screen so that a single offline metric did not choose the player.
+
+### Frozen screen
+
+Every exact artifact played the same 20 paired games from untouched opening offset 5,420,000:
+
+| Player    | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Incumbent |   12 |     5 |     7 |    0 |     43 |            1 |  114.6s |
+| LR `3e-6` |   11 |     7 |     4 |    0 |     41 |            2 |  112.7s |
+| LR `1e-5` |   13 |     7 |     6 |    0 |     49 |            2 |  115.0s |
+| LR `3e-5` |   10 |     5 |     5 |    0 |     59 |            0 |  116.0s |
+
+The middle learning rate was the unique cap-safe leader and advanced unchanged.
+
+### Untouched confirmations
+
+| Opening offset | Incumbent wins | Candidate wins | Incumbent Black / White | Candidate Black / White | Caps | Incumbent / candidate runtime |
+| -------------: | -------------: | -------------: | :---------------------- | :---------------------- | ---: | ----------------------------: |
+|      5,430,000 |             18 |             23 | 10 / 8                  | 13 / 10                 |    0 |               220.7s / 221.3s |
+|      5,440,000 |             22 |             19 | 11 / 11                 | 9 / 10                  |    0 |               230.1s / 237.3s |
+|      **Total** |         **40** |         **42** | **21 / 19**             | **22 / 20**             |    0 |           **450.8s / 458.6s** |
+
+The five-game first-block gain reversed to a three-game loss on the second untouched block. The pooled two-game edge is not a repeated gain and costs 1.7% more runtime. Search distillation into the existing adapters is therefore rejected; no candidate is promoted. The accepted checkpoint remains `moka-global-soup-exact-q50-int8-roundtrip.safetensors`, and the accepted player remains ordinary fixed 128-visit PUCT.
+
+## 2026-07-31 — Exact terminal-proof propagation rejection
+
+### Full MCTS-Solver screen
+
+An opt-in MCTS-Solver layer tracked exact terminal wins and losses separately from neural values. A parent became proven winning when any child was proven losing for the child player. A parent became proven losing only when every legal child was expanded and proven winning for the child player; opponent branch pruning and the early pass restriction therefore prevented unsound loss proofs. Proven terminal values never replaced unresolved neural evaluations.
+
+The first variant also excluded a proven-losing action while any unresolved alternative remained. It was screened against ordinary PUCT on 20 paired games from opening offset 5,450,000:
+
+| Player         | Wins | Black | White | Caps | Passes | Resignations | Teacher passes | Runtime |
+| :------------- | ---: | ----: | ----: | ---: | -----: | -----------: | -------------: | ------: |
+| Control        |   10 |     6 |     4 |    1 |     58 |            1 |             49 |  119.3s |
+| Terminal proof |   10 |     6 |     4 |    6 |     60 |            4 |             91 |  152.5s |
+
+The candidate ties wins but adds five move caps and costs 27.8% more runtime. Four new caps were nonrepeating cleanup failures where Moka was already far behind; excluding the immediately losing pass made it prolong the game through unresolved alternatives that did not offer a realistic recovery. The full loss-pruning variant is rejected.
+
+### Positive-proof-only screen
+
+A narrower follow-up removed all proven-loss filtering. It retained ordinary PUCT allocation and maximum-visit selection unless search found an actually proven winning root action. On a fresh 20-game block from opening offset 5,460,000, it reproduced the control exactly:
+
+| Player              | Wins | Black | White | Caps | Passes | Resignations | Teacher passes | Runtime |
+| :------------------ | ---: | ----: | ----: | ---: | -----: | -----------: | -------------: | ------: |
+| Control             |   15 |     7 |     8 |    0 |     36 |            1 |             34 |  119.5s |
+| Positive proof only |   15 |     7 |     8 |    0 |     36 |            1 |             34 |  118.8s |
+
+Exact winning-action proofs are too sparse to change the 128-visit player, while pruning proven-losing actions harms cleanup and termination. Terminal-proof propagation is rejected without confirmation and its node state, search logic, CLI flag, and tests are removed. Existing exact terminal scoring remains unchanged.
+
+## 2026-07-31 — Implicit-minimax backup rejection
+
+Mean MCTS backups can dilute a sharp line, while pure minimax is brittle under noisy leaf evaluation. An opt-in research implementation therefore retained ordinary mean Q and separately backed up the best evaluated neural continuation:
+
+\[
+M(s)=\max_a[-M(s_a)]
+\]
+
+PUCT selection used `(1-alpha) * Q + alpha * M` before the unchanged exploration term. New leaves initialized `M` from the same neural value already computed by search. The method added no evaluations, model parameters, browser bytes, heuristic board score, or teacher access. Weight zero preserved ordinary PUCT selection.
+
+Weights 0.1, 0.2, and 0.4 were frozen before a matched 20-game screen from opening offset 5,470,000:
+
+| Minimax weight | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| -------------: | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+|            0.0 |   12 |     8 |     4 |    0 |     57 |            1 |  124.5s |
+|            0.1 |   13 |    10 |     3 |    0 |     47 |            1 |  120.2s |
+|            0.2 |   10 |     7 |     3 |    0 |     55 |            5 |  126.6s |
+|            0.4 |   11 |     8 |     3 |    0 |     48 |            1 |  122.8s |
+
+The light blend adds one aggregate win but loses one White win, while both stronger blends regress and every nonzero weight reduces White strength. There is no balanced unique leader to confirm. Implicit minimax is rejected, and its node state, backup logic, CLI control, and tests are removed.
+
+## 2026-07-31 — Lower first-play-urgency reduction accepted
+
+### Calibration
+
+The accepted FPU reduction 0.5 was calibrated at 64 visits. Doubling the budget gives more opportunity to recover from an optimistic first visit, so reductions 0.25, 0.5, 0.75, and 1.0 were screened at fixed 128 visits. Every other model, search, opening, and rule setting was identical on the 20-game block at opening offset 5,420,000:
+
+| FPU reduction | Wins | Black | White | Caps | Resignations | Runtime |
+| ------------: | ---: | ----: | ----: | ---: | -----------: | ------: |
+|          0.25 |   13 |     7 |     6 |    0 |            0 |  113.7s |
+|          0.50 |   12 |     5 |     7 |    0 |            1 |  118.5s |
+|          0.75 |   11 |     7 |     4 |    0 |            1 |  108.9s |
+|          1.00 |    8 |     5 |     3 |    0 |            1 |  107.0s |
+
+Reduction 0.25 was frozen as the unique, narrow leader.
+
+### Independent confirmations
+
+Two untouched 40-game blocks compared the frozen candidate with the incumbent:
+
+| Opening offset | FPU 0.50 | FPU 0.25 | 0.50 Black / White | 0.25 Black / White | Caps |
+| -------------: | -------: | -------: | :----------------- | :----------------- | ---: |
+|      5,430,000 |       18 |       22 | 10 / 8             | 13 / 9             |    0 |
+|      5,440,000 |       17 |       22 | 9 / 8              | 11 / 11            |    0 |
+|      **Total** |   **35** |   **44** | **19 / 16**        | **24 / 20**        |    0 |
+
+The candidate wins both independent blocks, adds five Black and four White wins, and introduces no cap. Aggregate runtime was 461.6 seconds versus 433.8 seconds for the control, a 6.4% difference caused by changed game trajectories rather than extra search work; both use exactly 128 evaluations per real move.
+
+FPU reduction 0.25 is accepted as the default for the 128-visit player. It changes no model weight, browser payload, or neural evaluation count.
+
+## 2026-07-31 — Opponent reply width under accepted FPU
+
+Opponent width four was retested because the accepted FPU reduction changed from 0.5 to 0.25 and the visit budget had doubled from its original calibration. The exact promoted checkpoint, 128 visits, FPU 0.25, exploration 1.75, value weight 1.25, full symmetry evaluation, and every rule setting were fixed on 20 fresh games from opening offset 5,460,000.
+
+| Opponent width | Wins | Black | White | Caps | Runtime |
+| -------------: | ---: | ----: | ----: | ---: | ------: |
+|              2 |    9 |     5 |     4 |    0 |  125.1s |
+|              4 |   15 |     7 |     8 |    0 |  113.4s |
+|              8 |   11 |     7 |     4 |    0 |  121.7s |
+|           Full |   11 |     5 |     6 |    0 |  122.4s |
+
+Width four remains the unique leader by four games or more, improves both colors relative to every challenger, and is also the fastest measured run on the block. No candidate advances. Opponent width four remains accepted.
+
+## 2026-07-31 — Root symmetry blend under accepted FPU
+
+The root geometric-policy blend was rechecked because FPU 0.25 explores more low-prior children than the former 0.5 default. The exact promoted checkpoint, 128 visits, FPU 0.25, opponent width four, and all other search settings were fixed on 20 fresh games from opening offset 5,470,000.
+
+| Root geometric weight | Wins | Black | White | Caps | Runtime |
+| --------------------: | ---: | ----: | ----: | ---: | ------: |
+|                 0.000 |   12 |     8 |     4 |    0 |  123.4s |
+|                 0.125 |   12 |     8 |     4 |    0 |  118.5s |
+|                 0.250 |   12 |     8 |     4 |    0 |  124.4s |
+
+The arithmetic endpoint, incumbent, and stronger geometric endpoint reproduce the same wins, colors, and caps. With no directional signal, intermediate weights are not screened after observing the tie. Root geometric weight 0.125 remains accepted.
+
+## 2026-07-31 — Descendant symmetry blend under accepted FPU
+
+The descendant geometric-policy blend affects every expanded node and was therefore rechecked separately under FPU 0.25. The exact promoted checkpoint, 128 visits, opponent width four, root geometric weight 0.125, openings, colors, and rules were fixed on 20 fresh games from opening offset 5,480,000.
+
+| Descendant geometric weight | Wins | Black | White | Caps | Runtime |
+| --------------------------: | ---: | ----: | ----: | ---: | ------: |
+|                       0.000 |   10 |     6 |     4 |    0 |  128.8s |
+|                       0.125 |   12 |     7 |     5 |    0 |  128.4s |
+|                       0.250 |   12 |     7 |     5 |    0 |  145.6s |
+
+Pure arithmetic loses two games. The stronger geometric endpoint reproduces the incumbent's wins, color split, and caps rather than improving them. There is no unique challenger, so descendant geometric weight 0.125 remains accepted.
+
+## 2026-07-31 — Descendant policy temperature under accepted FPU
+
+Descendant policy temperature was retuned because FPU 0.25 and 128 visits changed how low-prior moves enter the tree. The exact promoted checkpoint, opponent width four, root and descendant geometric weights 0.125, and every other setting were fixed on 20 fresh games from opening offset 5,490,000:
+
+| Descendant temperature | Wins | Black | White | Caps | Runtime |
+| ---------------------: | ---: | ----: | ----: | ---: | ------: |
+|                    0.9 |    8 |     3 |     5 |    0 |  130.4s |
+|                    1.0 |    9 |     5 |     4 |    0 |  133.4s |
+|                    1.1 |   10 |     6 |     4 |    0 |  129.5s |
+|                    1.2 |   11 |     6 |     5 |    0 |  119.4s |
+
+Temperature 1.2 was frozen as the unique screen leader. On 40 untouched matched games from opening offset 5,500,000, both temperature 1.0 and 1.2 scored 18 wins, split 11 Black and seven White, with zero caps and two resignations. Runtime was 240.0 and 244.2 seconds respectively.
+
+The two-game screen gain disappears completely on fresh openings. Descendant temperature 1.2 is rejected without a second confirmation, and temperature 1.0 remains accepted.
+
+## 2026-07-31 — Descendant exploration under accepted FPU
+
+Root and descendant exploration both inherited 1.75. A separate descendant coefficient was retuned because FPU 0.25 changes the value assigned to unvisited children throughout the tree. The exact checkpoint, 128 visits, root exploration 1.75, opponent width four, symmetry settings, and rules were fixed on 20 fresh games from opening offset 5,510,000.
+
+| Descendant exploration | Wins | Black | White | Caps | Runtime |
+| ---------------------: | ---: | ----: | ----: | ---: | ------: |
+|                   1.50 |   10 |     5 |     5 |    0 |  113.2s |
+|                   1.75 |   14 |     6 |     8 |    0 |  110.2s |
+|                   2.00 |   11 |     5 |     6 |    0 |  121.8s |
+|                   2.25 |   12 |     4 |     8 |    0 |  129.5s |
+
+The inherited 1.75 coefficient remains the unique leader by at least two games and is the fastest measured run. No challenger advances. Descendants continue to inherit root exploration 1.75.
+
+## 2026-07-31 — Root-only FPU isolation
+
+The accepted FPU reduction 0.25 applies at every tree node. An existing root-only control kept reduction 0.25 at the real root and returned descendants to neutral FPU, isolating whether the accepted gain came only from broader root exploration. Both players used the exact checkpoint, 128 visits, opponent width four, and identical 20-game block at opening offset 5,520,000.
+
+| FPU topology | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :----------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| All nodes    |   11 |     7 |     4 |    0 |     57 |            1 |  126.7s |
+| Root only    |   11 |     7 |     4 |    0 |     45 |            2 |  138.5s |
+
+Root-only FPU reproduces wins, colors, and caps but adds one resignation and costs 9.3% more measured runtime through changed trajectories. It offers no strength gain. All-node FPU 0.25 remains accepted.
+
+## 2026-07-31 — Generalized PUCT rejection
+
+Ordinary PUCT scales its prior exploration bonus with the square root of parent visits. A generalized form replaced that factor with `N^tau`. Two exponents from the direct Go-search literature were fixed before evaluation: 0.625 and 0.737. Their exploration coefficients were normalized to match the accepted `c = 1.75` control at 128 parent visits, giving 0.954 and 0.554 respectively. The model, 128-evaluation budget, FPU 0.25, opponent width four, symmetry settings, openings, colors, and rules were otherwise identical on the matched 20-game block at opening offset 5,490,000.
+
+| Parent exponent | Exploration | Wins | Black | White | Caps | Runtime |
+| --------------: | ----------: | ---: | ----: | ----: | ---: | ------: |
+|           0.500 |       1.750 |    9 |     5 |     4 |    0 |  120.7s |
+|           0.625 |       0.954 |    6 |     3 |     3 |    0 |  118.2s |
+|           0.737 |       0.554 |    9 |     5 |     4 |    0 |  114.1s |
+
+Exponent 0.625 loses three games evenly across colors. Exponent 0.737 exactly ties the control's wins, color split, and caps rather than improving it. Neither challenger qualifies for confirmation. Generalized PUCT is rejected, and its node state, session parameter, CLI control, and tests are removed. Moka retains ordinary square-root PUCT.
+
+## 2026-07-31 — Fixed-width global atari preservation rejection
+
+The accepted opponent width four can omit tactical replies when Moka's small policy ranks them too low. A first implementation scanned every side-to-move group in atari and gave its legal extension and adjacent countercaptures priority inside the same four slots, displacing lower-ranked policy moves. The checkpoint, 128-evaluation budget, all search settings, openings, colors, and rules were identical on 20 matched games from opening offset 5,510,000.
+
+| Opponent reply selection | Wins | Black | White | Caps | Resignations | Runtime |
+| :----------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Policy top four          |   14 |     6 |     8 |    0 |            1 |  114.2s |
+| Global atari first       |   13 |     6 |     7 |    0 |            1 |  118.8s |
+
+Forcing board-wide atari replies into a fixed width loses one White game and costs 4.0% runtime. The implementation is rejected and removed. The narrower follow-up is preregistered independently: union policy top four with only legal tactical replies caused by the immediately preceding move, without displacing policy moves or changing their priors.
+
+## 2026-07-31 — Local tactical branch completion rejection
+
+Corpus analysis found a legal tactical reply causally related to the preceding move below policy rank four in 3.94% of accepted-search positions, at median rank nine. The preregistered candidate completed opponent branches with `policy top four union local replies`: capture the preceding move's chain when it was in atari, extend an adjacent side-to-move chain in atari, or countercapture an adjacent attacker in atari. Added moves retained their native priors and received no bonus or guaranteed visit. The checkpoint, 128-evaluation budget, search settings, openings, colors, and rules were identical on 20 fresh games from opening offset 5,520,000.
+
+| Opponent reply selection | Wins | Black | White | Caps | Resignations | Runtime |
+| :----------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Policy top four          |   11 |     7 |     4 |    0 |            1 |  128.2s |
+| Top four plus local      |   11 |     7 |     4 |    0 |            1 |  129.7s |
+
+The candidate exactly reproduces wins, colors, caps, passes, resignations, and teacher passes while adding 1.2% runtime. It does not meet the fixed advancement gate of two additional wins with neither color worse. Local tactical completion is rejected without confirmation, and its helper, node option, CLI flag, and tests are removed.
+
+## 2026-07-31 — Confidence-weighted recursive backup rejection
+
+A search-only candidate replaced ordinary visit-weighted child averaging with an optimistic confidence weight. Each child's current value was compared with the sibling visit-weighted mean through a three-degree Student distribution, then better-than-mean children received moderately greater backup weight. The direct network value retained one pseudo-visit. The candidate added no model evaluation, model byte, board heuristic, teacher query, or rule override; disabled mode preserved ordinary MCTS exactly.
+
+The exact promoted checkpoint, 128-evaluation budget, accepted FPU 0.25, opponent width four, search settings, openings, colors, and rules were fixed on 20 fresh paired games from opening offset 5,540,000.
+
+| Backup                  | Wins | Black | White | Caps | Resignations | Runtime |
+| :---------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Ordinary visit-weighted |   12 |     7 |     5 |    0 |            1 |  131.2s |
+| Confidence-weighted     |   11 |     5 |     6 |    0 |            2 |  133.0s |
+
+The candidate loses one game overall and two Black wins, adds a resignation, and costs 1.4% runtime. It fails the fixed screen gate and is rejected without confirmation. Its node state, backup formula, CLI flag, constants, and tests are removed. Moka retains ordinary visit-weighted backup.
+
+## 2026-07-31 — Confidence-weighted recursive backup rejection
+
+KataGo's analysis search can reduce the influence of clearly poor exploratory children when recursively estimating a node. For node-perspective child values, the candidate computed a visit-weighted mean, estimated uncertainty as `sqrt(1e-8 + 1 / (1.5 * sqrt(visits)))`, transformed each standardized deviation through a three-degree-of-freedom Student-t CDF, and raised `CDF + 1e-4` to the fixed KataGo exponent 0.25. Child weights were renormalized to preserve total visits, then combined with the node's direct Moka evaluation. Ordinary visits, PUCT, priors, FPU, model outputs, and 128-evaluation budget remained unchanged. The matched 20-game screen used opening offset 5,530,000.
+
+| Backup                   | Wins | Black | White | Caps | Resignations | Runtime |
+| :----------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Visit mean               |   13 |     6 |     7 |    0 |            1 |  125.9s |
+| Confidence-weighted 0.25 |   12 |     6 |     6 |    0 |            1 |  136.8s |
+
+Confidence weighting loses one White game and adds 8.7% runtime. It fails both the strength and runtime gates and is rejected without confirmation. Its recursive state, Student-t calculation, CLI flag, constants, and tests are removed.
+
+## 2026-07-31 — Exact root futile-visit pruning rejection
+
+The candidate excluded a root child only under the strict bound `child visits + remaining simulations < leader visits`. Such a child cannot tie the final maximum-visit action even if it receives every remaining simulation. The implementation accounted for reserved batched visits and retained tie-capable children. It changed no descendant selection, model evaluation, prior, or total 128-evaluation budget. The matched 20-game screen used opening offset 5,540,000.
+
+| Root allocation    | Wins | Black | White | Caps | Resignations | Runtime |
+| :----------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Ordinary PUCT      |   12 |     7 |     5 |    0 |            1 |  128.0s |
+| Exact futile prune |    9 |     5 |     4 |    0 |            0 |  133.9s |
+
+Although the final-visit bound is exact, reallocating late evaluations among the remaining children changes their search values and loses three games across both colors. Runtime also rises 4.6% through changed trajectories. Root futile-visit pruning is rejected without confirmation, and its node flag, allocation logic, CLI flag, constant, and tests are removed.
+
+## 2026-07-31 — Direct-value FPU baseline blend rejection
+
+Ordinary FPU uses the node's running search mean minus the accepted reduction 0.25. A single early child can therefore move the baseline before search has covered much policy mass. The candidate stored Moka's direct node value and blended the FPU baseline toward the running mean with `search weight = min(1, visited prior mass squared)`. The 0.25 reduction itself, PUCT, priors, model output, and 128-evaluation budget were unchanged. The matched 20-game screen used opening offset 5,550,000.
+
+| FPU baseline                 | Wins | Black | White | Caps | Resignations | Runtime |
+| :--------------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Running search mean          |    8 |     3 |     5 |    0 |            1 |  132.0s |
+| Direct-to-search prior blend |    9 |     4 |     5 |    0 |            1 |  129.7s |
+
+The candidate adds one Black win, preserves White wins and caps, and is 1.7% faster on the block. It is directionally positive but does not meet the preregistered two-win advancement threshold, so it is rejected without confirmation. Its stored node value, blend, CLI flag, constants, and tests are removed. This result is worth reconsidering only as a frozen part of a future larger-budget combined search change, not as a promoted standalone tweak.
+
+## 2026-07-31 — Opponent-reply auxiliary rejection
+
+KataGo uses a training-only auxiliary policy head to predict the opponent's next move. A matched Moka ablation attached a separate 26,326-parameter reply head to the exact promoted global-residual network, trained the shared trunk with that objective, and stripped the reply head before deployment. It changed neither deployed architecture, parameter count, browser payload, inference, nor search. KataGo remained an offline label source only.
+
+A reproducible converter recovered 15,772 consecutive reply targets from the 16,028-position b18-guided outcome corpus by ordering each of 256 games by move count. Whole-game train, validation, and test splits contained 12,917, 1,469, and 1,642 positions. Three matched one-epoch INT8-aware seeds used learning rate 0.000002 and policy preservation weight 0.25. Reply loss weight 0.1 changed raw top moves on at most 0.023% of the fresh 4,319-position search corpus and reproduced every matched two-game result. Frozen weights 0.25, 0.5, and 1.0 increased the behavioral effect; 1.0 was the only candidate taken to a fresh arena screen.
+
+The exact-dequantized weight-1.0 candidate and its matched no-reply control used the promoted 128-evaluation search, FPU 0.25, opponent width four, identical rules, colors, and 20 fresh games from opening offset 5,570,000.
+
+| Training objective | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :----------------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Matched control    |    8 |     6 |     2 |    0 |     43 |            2 |  117.4s |
+| Opponent reply     |    8 |     6 |     2 |    0 |     43 |            3 |  118.3s |
+
+The candidate exactly ties wins, colors, caps, and passes while adding one resignation and 0.8% runtime. It fails the advancement gate without confirmation. The auxiliary network, dataset converter, CLI, loss path, constant, and tests are removed. The deployed model and ordinary training pipeline remain unchanged.
+
+## 2026-07-31 — Bounded tactical quiescence rejection
+
+The candidate retained all 128 ordinary MCTS simulations, then selectively extended unstable leaves caused by the preceding move. A depth-three negamax read considered up to two legal local captures, atari extensions, or countercaptures plus one highest-policy global alternative. Each read was capped at eight additional network states and each real move at 16. Incomplete reads returned the original leaf value. The design added no model parameters, teacher query, handcrafted territory score, or rule override.
+
+The preregistered three-arm screen fixed the exact promoted checkpoint, FPU 0.25, opponent width four, symmetry settings, colors, rules, and 20 fresh games from opening offset 5,560,000.
+
+| Search                         | Wins | Black | White | Caps | Resignations | Runtime |
+| :----------------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Ordinary 128 visits            |   13 |     6 |     7 |    0 |            0 |  121.3s |
+| Ordinary 144 visits            |   13 |     6 |     7 |    0 |            1 |  141.8s |
+| 128 visits plus tactical reads |   12 |     7 |     5 |    0 |            1 |  143.4s |
+
+The tactical arm triggered 15,947 reads but completed only 1,998; 13,949 exceeded a bounded subtree budget and fell back to the original value after consuming 9,403 additional evaluations. It loses one game overall and two White wins, adds a resignation, and costs 18.2% runtime. It fails every advancement requirement except caps, so it is rejected without confirmation. Its leaf reader, budgets, CLI, diagnostics, and tests are removed. Further work should improve the learned leaf evaluator rather than add another search-time microheuristic.
+
+## 2026-07-31 — Root-search value distillation rejection
+
+The accepted 128-visit search corpus contains 4,319 on-policy positions and at least 127 searched child visits per position. A new training-only target computed the visit-weighted mean of root-perspective child values, allowing the existing value head to imitate the conclusion of Moka's own deeper search. The candidate changed only the six existing value tensors after an exact value-only INT8 merge. It added no parameters, browser bytes, inference, teacher query, or runtime heuristic; all 114 policy, trunk, and global-context tensors remained byte-identical.
+
+Three one-epoch exact-QAT candidates used random board symmetries, seed 450, and learning rates 0.00001, 0.00003, and 0.0001. The 0.00001 candidate was frozen because it improved held-out root-search MAE from 0.1891 to 0.1725, improved the separate 16,028-position b18 test MAE from 0.4938 to 0.4812, and exactly preserved MAE and value-sign agreement on the independent offset-4,720,000 test split. Larger updates regressed that independent split.
+
+The frozen candidate passed a 20-game screen from opening offset 5,580,000, then reversed on the first untouched 40-game confirmation block:
+
+| Opening offset | Player    | Wins | Black | White | Caps | Resignations | Runtime |
+| -------------: | :-------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+|      5,580,000 | Control   |    7 |     5 |     2 |    0 |            0 |  132.5s |
+|      5,580,000 | Candidate |   10 |     6 |     4 |    0 |            0 |  122.3s |
+|      5,590,000 | Control   |   25 |    12 |    13 |    0 |            2 |  229.3s |
+|      5,590,000 | Candidate |   21 |     7 |    14 |    0 |            2 |  248.8s |
+
+The screen's three-game gain reverses to a four-game loss, driven by five lost Black games. Better static and self-search value metrics still do not predict stronger tree decisions at this scale. The candidate is rejected without a second confirmation block, and the deployed checkpoint remains unchanged. The target constructor remains training-only for reproducibility; Moka inference and search are unaffected.
+
+## 2026-07-31 — Orthogonal search-policy and root-value combination rejection
+
+The rejected current-player 128-visit adapter candidate changed only 12 global-context tensors and had improved Black aggregate while leaving White aggregate flat across its frozen screen and confirmations. The root-search value candidate changed a disjoint six value tensors and improved White while regressing Black. A new exact checkpoint combined those two frozen corrections without interpolation or tuning. It retained 105,353 parameters, changed exactly 18 intended tensors, left the other 102 byte-identical, and added no inference or browser payload tensor.
+
+Unlike either component alone, the combination passed every offline safety gate. Relative to the incumbent, it improved fresh 128-search test policy loss from 1.76994 to 1.76929 and root-search value MAE from 0.18910 to 0.17947. It improved the 16,028-position b18 test value MAE from 0.49380 to 0.48678. On the independent offset-4,720,000 test split, policy loss improved from 2.86677 to 2.86586 and value MAE from 0.42449 to 0.42375, with unchanged top-move agreement.
+
+The frozen 20-game screen used opening offset 5,600,000 and the accepted 128-visit search:
+
+| Player   | Wins | Black | White | Caps | Resignations | Runtime |
+| :------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control  |   11 |     8 |     3 |    0 |            0 |  122.9s |
+| Combined |   10 |     7 |     3 |    0 |            0 |  117.6s |
+
+The candidate loses one Black game and fails the fixed two-win, neither-color-worse advancement gate. It is rejected without confirmation. Complementary historical color aggregates and jointly improved static metrics do not establish stronger play; the deployed checkpoint remains unchanged.
+
+## 2026-07-31 — Current-player native-b18 all-turn search distillation tie
+
+### Strong-search corpus
+
+The exact promoted checkpoint played 64 fresh games against greedy b6c96 from opening offset 5,610,000 using its accepted 128-visit MCTS. Every Moka turn was frozen before teacher analysis. Native 9×9 KataGo b18 then labeled all 2,238 roots at 256 visits with visit policy, root value, per-child searched values and weights, ownership, and score lead. The corpus contains 31,666 visited child states, 233 validation roots, and 258 test roots split by whole game. Root visit totals are 255 or 256, and Moka's played move matches b18's top-visit move on 43.8% of positions.
+
+The compressed corpus is `moka-current-b18-search256-allturns-offset5610k-64.npz`, 1,544,931 bytes, with SHA-256 `344dd55d6a6601ef6f746b9412c83203c9bd373e42dbab27684adb0311415fe7`. KataGo is an offline labeler only and is not part of candidate inference.
+
+### Frozen adapter candidate
+
+Three one-epoch exact-QAT updates trained only the existing 12 global-context tensors with seed 452, policy-preservation weight 0.25, and learning rates 0.000003, 0.00001, and 0.00003. Every exact checkpoint retained 105,353 parameters and left the other 108 tensors byte-identical. Only 0.000003 stayed inside the conservative independent-value safety envelope while improving the strong-teacher test policy loss from 2.55273 to 2.55233 and top-move agreement from 41.9% to 42.3%. Larger updates drifted monotonically on independent value sets and were excluded before arena testing.
+
+The frozen candidate used the accepted 128-visit search on 20 fresh paired games from opening offset 5,620,000:
+
+| Player    | Wins | Black | White | Caps | Resignations | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control   |   11 |     7 |     4 |    0 |            1 |  117.5s |
+| Candidate |   11 |     6 |     5 |    0 |            0 |  114.4s |
+
+The candidate trades one Black win for one White win and ties overall. It fails the two-win, neither-color-worse gate and is rejected without confirmation. The high-quality corpus is retained for future training research, but the deployed checkpoint and ordinary 128-visit search remain unchanged.
+
+## 2026-07-31 — Child-Q ranking rejected offline
+
+The all-turn native-b18 corpus contains 480 roots where at least two visited children differ by the minimum searched-value gap, producing 1,368 weighted ranking pairs. The promoted checkpoint orders 64.8% of held-out pairs correctly. Exact-QAT global-adapter candidates added a pairwise ranking loss at weights 0.05, 0.10, and 0.20, first for one epoch at learning rate 0.000003 and then for three epochs at 0.00001.
+
+None improved held-out ranking accuracy. The three-epoch candidates remained at 64.8% on the original test bucket, fell from 68.1% to 67.5% on validation, reduced the correct-pair margin, and worsened independent value errors. They were rejected without arena games. Sparse pairwise gradients do not move the quantized global adapter enough to improve ordering, while larger repeated steps damage calibration.
+
+## 2026-07-31 — Paired-opening split correction and balanced adapter screen
+
+### Split audit
+
+The historical whole-game split used `game_id % 10`. Arena and search-generation games alternate Moka's color, so validation bucket zero contained only even games with Moka as Black and test bucket one contained only odd games with Moka as White. This confounded model selection with color and separated the two colors of each matched opening across different splits.
+
+Training now accepts an opt-in game-pair size. With pair size two, both games from an opening use `(game_id // 2) % 10`. The corrected all-turn corpus has 291 validation positions, split 135 Black / 156 White, and 244 test positions, split 128 Black / 116 White. No opening pair crosses a split. Policy training, value training, supplemental-data filtering, and pairwise-value filtering all use the same tested bucket constructor. Default pair size one preserves historical recipes.
+
+### Balanced retraining
+
+Three one-epoch exact-QAT candidates retrained only the existing 12 global-context tensors with seed 455, policy-preservation weight 0.25, and learning rates 0.000003, 0.00001, and 0.00003. The exact materialized checkpoints retain 105,353 parameters and leave every other tensor byte-identical.
+
+The smallest rate was the only candidate retained for play. On the paired all-turn split it improved validation loss from 3.07893 to 3.07723 and preserved test top-move agreement at 53.3%. On the untouched offset-4,720,000 paired test split it improved loss from 2.84786 to 2.84516 and value MAE from 0.39127 to 0.38786. Larger rates improved their primary loss but increasingly degraded outcome-value and search-value safety sets.
+
+The frozen screen used the exact promoted search and 20 fresh paired games from opening offset 5,630,000:
+
+| Player    | Wins | Black | White | Caps | Resignations | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control   |    9 |     6 |     3 |    0 |            1 |  120.9s |
+| Candidate |   10 |     6 |     4 |    0 |            1 |  127.0s |
+
+The candidate gains one White game while preserving Black, caps, and resignations. It misses the fixed two-win advancement threshold and is rejected without confirmation. The paired split correction remains as research infrastructure; the promoted checkpoint and search defaults remain unchanged.
+
+## 2026-07-31 — Balanced policy-linear correction rejection
+
+The same paired strong-teacher split was used to isolate policy improvement from value drift. Three one-epoch exact-QAT candidates trained only `policy_linear.weight` and `policy_linear.bias` at learning rates 0.00001, 0.00003, and 0.0001 with seed 456 and policy-preservation weight 0.25. The artifact builder merged only those two quantized tensors into the exact promoted checkpoint after a generic whole-checkpoint requantization audit exposed unintended rounding of six frozen global weights.
+
+The 0.0001 exact candidate improved strong-teacher validation loss from 3.07893 to 3.07794 and test loss from 2.55290 to 2.55227, improving both colors. It also improved policy loss on the paired outcome-teacher and untouched offset-4,720,000 validation/test splits. Every non-policy tensor remained byte-identical, so all value outputs were exact matches to the control. It slightly regressed the independent search-distillation loss while adding one White top-move match on that test split.
+
+The frozen 20-game screen used opening offset 5,640,000:
+
+| Player    | Wins | Black | White | Caps | Resignations | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control   |   12 |     8 |     4 |    0 |            0 |  122.7s |
+| Candidate |   11 |     7 |     4 |    0 |            0 |  120.3s |
+
+The candidate loses one Black game and fails the strength and neither-color-worse gates. It is rejected without confirmation. Better balanced teacher likelihood in only the final policy projection still does not improve the accepted MCTS player.
+
+## 2026-07-31 — Policy-relative noise pruning rejection
+
+KataGo's policy-relative noise pruning was implemented from its primary search-update code as a distinct alternative to the earlier confidence-weighted backup. Each node recursively combined its direct Moka value with visited child values. Children were processed in descending raw-prior order; a lower-prior child was discounted only when its utility was worse than the weighted prefix and its visit weight exceeded twice its policy-justified share. The single preregistered utility scale was KataGo's 0.15, with no pruning cap. Scale zero used ordinary mean values exactly.
+
+The method changed no visits, priors, exploration, model evaluation, parameter, payload byte, legal move, or teacher access. Regression tests covered the discount calculation, invalid scales, and exact disabled behavior. The matched 20-game screen used opening offset 5,650,000:
+
+| Player            | Wins | Black | White | Caps | Passes | Resignations | Teacher passes | Runtime |
+| :---------------- | ---: | ----: | ----: | ---: | -----: | -----------: | -------------: | ------: |
+| Ordinary backup   |   11 |     7 |     4 |    0 |     40 |            0 |             53 |  129.7s |
+| Noise-pruned 0.15 |   11 |     7 |     4 |    0 |     40 |            0 |             53 |  126.1s |
+
+Every aggregate counter reproduced exactly. At Moka's 128-visit scale, no child accumulated enough excess low-prior weight for the recursively adjusted utility to change a root decision. The method is rejected without confirmation, and its node state, CLI, constants, and tests are removed. Ordinary mean backup remains accepted.
+
+## 2026-07-31 — Second current-player b18 corpus and combined-adapter tie
+
+### Disjoint corpus
+
+The exact promoted player generated a second 64-game all-turn corpus from opening offset 5,660,000 with the accepted 128-visit MCTS. Native b18 then labeled every frozen Moka decision at 256 visits. The archive contains 2,199 roots, 28,205 visited child states, and all 64 games. Root visit totals are 255 or 256, b18 evaluated Moka's selected move on 95.5% of roots, and Moka's move matches the b18 top-visit move on 46.7%.
+
+The paired split contains 267 validation positions, split 111 Black / 156 White, and 303 test positions, split 155 Black / 148 White. It has zero root-feature duplicates with the first all-turn corpus. Every used target is finite; the intentionally absent counterfactual-value field contains only its NaN sentinel. The archive is 1,434,016 bytes with SHA-256 `1ee776687e58ce97d591378ca1e73e5ed81c5b3a188bc9997bf257fc3dfe82f5`.
+
+### Combined adapter
+
+The second corpus supplied validation and test positions while the first corpus contributed only its paired training split. Three one-epoch exact-QAT candidates trained the existing 12 global-context tensors with seed 458, policy-preservation weight 0.25, and learning rates 0.000003, 0.00001, and 0.00003. Training used 3,332 roots without changing parameter count or payload structure.
+
+Only 0.000003 remained inside the conservative safety envelope. It improved the second-corpus test loss from 2.86127 to 2.85914 and top-move agreement from 38.9% to 39.6%, with both-color policy gains. It improved the first-corpus held-out loss, the untouched offset-4,720,000 test loss/value, and the 128-search test top-move rate. Larger steps increasingly damaged outcome-value calibration.
+
+The frozen screen used 20 fresh paired games from opening offset 5,670,000, disjoint from both training corpora:
+
+| Player    | Wins | Black | White | Caps | Resignations | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control   |   10 |     4 |     6 |    0 |            1 |  115.7s |
+| Candidate |   10 |     4 |     6 |    0 |            1 |  125.1s |
+
+The combined-data candidate reproduces every outcome aggregate and misses the two-win advancement gate. It is rejected without confirmation. More high-quality current-player data improves static metrics but the 12-tensor adapter remains too constrained to change measured strength reliably.
+
+## 2026-07-31 — Combined-data full-network QAT tie
+
+The same two paired corpora trained the fixed 105,353-parameter network without an adapter-only mask. Three one-epoch exact-QAT candidates used seed 459, policy-preservation weight 0.25, and learning rates 0.0000003, 0.000001, and 0.000003. Every exact artifact retained the existing architecture and browser payload structure while changing all 120 deployment tensors.
+
+The two larger steps were rejected offline because their stronger primary-corpus gains came with increasing outcome-value drift. The 0.0000003 candidate was the only conservative candidate. It improved the second-corpus validation/test losses from 3.04798 / 2.86127 to 3.04500 / 2.86013, improved the first-corpus validation/test losses from 3.07893 / 2.55290 to 3.07727 / 2.55226, and reduced value error on the untouched offset-4,720,000 and 128-search test splits. Its outcome-teacher test value MAE moved from 0.49200 to 0.49311.
+
+The frozen screen used 20 fresh paired games from opening offset 5,680,000:
+
+| Player    | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Control   |   10 |     5 |     5 |    0 |     36 |            1 |  137.3s |
+| Candidate |   10 |     5 |     5 |    0 |     49 |            1 |  143.4s |
+
+The candidate changes pass behavior but reproduces wins, colors, caps, and resignations. It is rejected without confirmation. Uniform strong-teacher distillation now improves multiple held-out metrics under both constrained and full-network updates, but neither update changes measured playing strength. The next training experiment should spend gradient on b18 child-Q-regret positions rather than treating value-equivalent top-policy disagreements as equally important.
+
+## 2026-07-31 — Consequence-weighted full-network soup rejection
+
+The two all-turn corpora contain 195 material training mistakes where b18's searched value for Moka's actual move trails its top-visit move by at least 0.2. Smooth rollout-regret weighting retained every soft visit-policy target while scaling sample weights from 0.25 to 4.0 by searched action regret. The first and second archives had mean weights 0.395 and 0.385; unlike earlier critical replay, no row was dropped and no target was replaced by a hard one-hot label.
+
+Three one-epoch full-network exact-QAT candidates used seed 460, policy-preservation weight 0.25, and learning rates 0.0000003, 0.000001, and 0.000003. Regret weighting improved the independent outcome-teacher test but moved the untouched offset-4,720,000 value metric opposite the uniform objective. The smallest regret candidate improved outcome MAE from 0.49200 to 0.49132 while the matched uniform candidate had 0.49311; on offset-4,720,000 the regret and uniform MAEs were 0.39268 and 0.38894 versus control's 0.39127.
+
+A single predeclared 50/50 checkpoint soup averaged those opposing 0.0000003 candidates, then rematerialized exact INT8 weights. It was distinct from both endpoints, retained 105,353 parameters, and changed the same 120 existing tensors. It improved both all-turn corpora, reduced offset-4,720,000 MAE to 0.39079, improved 128-search top-move agreement from 68.15% to 68.37%, and held outcome MAE to 0.49223.
+
+The frozen screen used opening offset 5,690,000:
+
+| Player   | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Control  |   10 |     5 |     5 |    0 |     41 |            2 |  114.9s |
+| Soup 50% |   10 |     5 |     5 |    0 |     39 |            3 |  120.0s |
+
+The soup ties every win aggregate and adds one resignation. It fails both the strength and resignation gates and is rejected without confirmation. Consequence weighting balances static value errors when combined with uniform training, but the resulting model still does not improve measured play.
+
+## 2026-07-31 — Higher visit count improves wins but fails endgame safety
+
+The exact promoted checkpoint was screened at 128, 192, and 256 ordinary PUCT visits with every accepted search parameter fixed. The 20 paired games used fresh opening offset 5,700,000.
+
+| Visits | Wins | Black | White | Caps | Resignations | Runtime |
+| -----: | ---: | ----: | ----: | ---: | -----------: | ------: |
+|    128 |    9 |     4 |     5 |    0 |            1 |  116.0s |
+|    192 |    8 |     5 |     3 |    0 |            2 |  191.0s |
+|    256 |   11 |     4 |     7 |    0 |            1 |  303.9s |
+
+The 192-visit arm regressed and was rejected. The 256-visit arm met the screen gate with two additional White wins, unchanged Black wins, and unchanged cap and resignation counts. It advanced to a 40-game confirmation on untouched opening offset 5,710,000.
+
+| Visits | Wins | Black | White | Caps | Resignations | Runtime |
+| -----: | ---: | ----: | ----: | ---: | -----------: | ------: |
+|    128 |   18 |     9 |     9 |    0 |            2 |  255.5s |
+|    256 |   25 |    13 |    12 |    0 |            4 |  462.6s |
+
+The additional search produces a large seven-game gain and improves both colors, but it doubles the resignation count and therefore fails the preregistered safety gate. A targeted deterministic rerun of the 256-visit arm disabled resignation to distinguish safe early exits from recoverable games. By game index seven, a previously resigned White game repeatedly passed while KataGo continued cleanup and reached the 120-move cap, losing by 74 area points. The remainder was stopped once the cap failure was established.
+
+More visits clearly improve Moka's tactical and strategic choices, but they also make its deficient late-game pass behavior more visible. The 256-visit default is not promoted and no second confirmation block is run. The next search experiment should preserve the 256-visit strength gain while replacing the heuristic resignation escape hatch with proof-safe endgame completion or a learned ownership/score signal.
+
+### Phase-budget recovery rejection
+
+Two deterministic recovery schedules retained 256 visits through move 59 and reduced only the late-game budget. They were tested on the same 40-game development block with a gate fixed before each run: at least 23 wins, at least nine wins per color, zero caps, no more than two resignations, and runtime below constant 256.
+
+| Early / late visits | Wins | Black | White | Caps | Resignations | Runtime |
+| ------------------: | ---: | ----: | ----: | ---: | -----------: | ------: |
+|           256 / 256 |   25 |    13 |    12 |    0 |            4 |  462.6s |
+|           256 / 128 |   25 |    13 |    12 |    0 |            3 |  437.3s |
+|            256 / 64 |   24 |    13 |    11 |    0 |            3 |  402.2s |
+
+Both schedules preserve most or all of the extra-compute strength and reduce runtime, showing that the gain is concentrated before move 60. Neither restores the resignation count to the 128-visit control's two. The 64-visit late arm also loses one completed White game. Phase-budget tuning is stopped after these two mechanistic candidates. No schedule is promoted; a learned endgame signal is required before revisiting the stronger early search.
+
+### Frozen 256-to-64 confirmation
+
+Because resignation at margin 60 records an ordinary loss rather than awarding a win, the faster 256-through-move-59 then 64-visit schedule received two untouched 40-game confirmations. The schedule was frozen before either block and never changed afterward.
+
+| Opening offset | Player        |   Wins |  Black |  White |  Caps | Resignations |    Runtime |
+| -------------: | :------------ | -----: | -----: | -----: | ----: | -----------: | ---------: |
+|      5,720,000 | 128 control   |     23 |     13 |     10 |     0 |            1 |     228.2s |
+|      5,720,000 | 256 then 64   |     27 |     12 |     15 |     0 |            0 |     404.5s |
+|      5,730,000 | 128 control   |     24 |     13 |     11 |     0 |            1 |     244.2s |
+|      5,730,000 | 256 then 64   |     21 |     11 |     10 |     0 |            1 |     404.7s |
+|      **Total** | **Control**   | **47** | **26** | **21** | **0** |        **2** | **472.4s** |
+|      **Total** | **Candidate** | **48** | **23** | **25** | **0** |        **1** | **809.2s** |
+
+The first untouched block adds four wins but trades one Black win for five White wins. The final untouched block reverses to a three-game loss and regresses both colors. Across 80 untouched games, the candidate gains only one game overall, loses three Black wins, gains four White wins, and costs 71.3% more runtime. It fails the replicated both-color strength gate and is rejected. Research defaults remain the exact promoted checkpoint with constant 128-visit MCTS.
+
+## 2026-07-31 — Paired current-player score head and late blend rejection
+
+The earlier learned score-margin experiment trained on 991 roots with the color-confounded whole-game split and blended score throughout search. The corrected experiment used 4,437 current-player roots from the two disjoint all-turn b18 corpora, paired opening splits, and the exact promoted checkpoint. A new configurable start move allowed the score signal to remain completely disabled before move 60.
+
+Three 115-parameter heads trained for 30 epochs while every one of the promoted checkpoint's 120 tensors remained frozen. Learning rates 0.0003, 0.001, and 0.003 used seeds 461–463. On the paired current-player test bucket their normalized score MAEs were 0.2186, 0.2228, and 0.2218. The 0.0003 head also had the best independent offset-4,720,000 MAE at 0.1798 and was frozen before play. Its checkpoint contains exactly four additional score tensors and 105,468 total parameters; every accepted policy, value, trunk, and global-context tensor is byte-identical.
+
+The 20-game screen used fresh opening offset 5,740,000 and constant 128-visit search. Score blending was disabled before move 60.
+
+| Late score weight | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| ----------------: | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+|              0.00 |    8 |     5 |     3 |    0 |     44 |            1 |  109.9s |
+|              0.10 |    8 |     5 |     3 |    0 |     43 |            1 |  110.0s |
+|              0.25 |    8 |     5 |     3 |    0 |     46 |            1 |  110.0s |
+
+Both nonzero weights reproduce every outcome aggregate while changing only late pass trajectories. Neither meets the two-win advancement gate, so the learned score head is rejected without confirmation. No further score-weight tuning is performed. The paired score-training split and opt-in late-start control remain for reproducibility; score weight stays zero and the deployed model remains unchanged.
+
+## 2026-07-31 — Strict Benson proof coverage is negligible
+
+A Python implementation ported only Benson's fixed-point pass-alive groups. It deliberately excludes the browser's broader surrounded-area and automatic-dead-stone branches. A group survives only when it retains at least two distinct vital regions; any removed group remains unknown rather than dead. Tests cover a connected two-eye group, a single-eye unknown group, the exact 9×9 score bounds, and an unsettled board.
+
+For certified Black and White stone counts `B` and `W`, the implementation computes the Black score interval `[2B - 88, 74 - 2W]`. It reports a winner only when the lower bound is positive or the upper bound is nonpositive. No neural value, teacher output, territory estimate, invasion assumption, or future move enters the proof.
+
+Coverage was measured without changing search on both current-player b18 corpora:
+
+| State source      | States | Proofs |   Rate | Black | White | b18 sign agreement |
+| :---------------- | -----: | -----: | -----: | ----: | ----: | -----------------: |
+| Moka roots        |  4,437 |      2 | 0.045% |     0 |     2 |               100% |
+| Searched children | 59,871 |     77 | 0.129% |     7 |    70 |               100% |
+
+Neither roots nor children produced a proof below 41 occupied points. Root proofs occurred at 53 and 59 occupied points; 67 of the 77 child proofs occurred between 41 and 60 occupied points and ten above 60. Strict Black-safe and White-safe stone counts averaged fewer than three points across searched children, far below the 45-Black or 37-White thresholds needed to prove a winner.
+
+The mechanism is sound but too sparse to affect Moka's 128-visit decisions reliably. Per the preregistered coverage gate, no hard search override or arena candidate is implemented. The proof utility and fixtures remain as reusable exact-rule infrastructure; production search remains unchanged.
+
+## 2026-07-31 — Adaptive 128-to-256 search rejection
+
+Uniform 256 visits produced a large gain on one block and reversed later. A frozen adaptive candidate instead ran the accepted 128 simulations at every root and added 128 more only when the top-two visit margin remained below 15%. The threshold came from the earlier adaptive-search audit and was not tuned on this block. The model, FPU, exploration, value weight, opponent width, symmetry settings, rules, and opening pairs remained fixed.
+
+On 20 fresh games from opening offset 5,750,000:
+
+| Search              | Wins | Black | White | Caps | Resignations | Runtime |
+| :------------------ | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Fixed 128 visits    |   13 |     8 |     5 |    0 |            0 |  110.3s |
+| Adaptive 128 to 256 |   12 |     6 |     6 |    0 |            0 |  134.9s |
+
+The adaptive arm loses one game overall and two Black wins while costing 22.3% more runtime. It fails the strength and neither-color-worse gates and is rejected without confirmation. Constant 128 visits remain accepted.
+
+## 2026-07-31 — Temporary short-value auxiliary rejection
+
+KataGo's short-horizon value target was tested as training-only supervision for Moka's existing leaf evaluator. A temporary 32-to-1 output copied the incumbent long-value output at initialization. The policy, trunk, and global-context tensors were frozen; the six existing value tensors and temporary two-tensor output trained jointly. The temporary head was stripped from the deployment checkpoint, leaving the original 105,353 parameters and 120 tensors. Tests verify identical long and short outputs at initialization and a QAT smoke run verifies that the stripped checkpoint contains no auxiliary tensor.
+
+The first 16,028-position outcome corpus produced a clear distribution-specific failure. One epoch at learning rate 0.00001 and auxiliary weight 0.25 improved its paired test MAE from 0.4920 to 0.4612, but regressed the independent offset-4,720,000 MAE from 0.4245 to 0.4451 and regressed both current-player b18 test blocks. It was rejected before play.
+
+A fresh corpus then used the exact promoted checkpoint, accepted 128-visit search, greedy b6c96 opponent, 64 paired games, and seed 471. Native b18c384 labeled every reached state with long and short values. The archive contains 4,728 positions, has SHA-256 `528849e22ffff2df69a682c27a17c2b0ed94b1428c13b9adda1415f452ee8f7c`, and is 800,227 bytes. The mean absolute long-to-short target gap is 0.0221 and their correlation is 0.9988.
+
+Matched long-only and auxiliary-weight-0.25 candidates used one epoch, seed 472, paired splits, random symmetry, exact INT8-aware training, and learning rates 0.000001, 0.000003, and 0.00001. After exact value-only materialization, the two arms were effectively identical. At learning rate 0.000001, both improved fresh-corpus test MAE from 0.46762 to 0.46712 and independent offset-4,720,000 MAE from 0.42449 to 0.42430. They preserved the offset-5,610,000 sign rate, regressed offset-5,660,000 MAE by 0.00035, and were neutral on the self-search test block.
+
+The frozen auxiliary candidate at learning rate 0.000001 was screened on 20 paired games from opening offset 5,760,000:
+
+| Player          | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :-------------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Incumbent       |   11 |     7 |     4 |    0 |     51 |            0 |  118.0s |
+| Short auxiliary |   12 |     6 |     6 |    0 |     33 |            0 |  116.1s |
+
+The candidate gains one aggregate game but loses one Black game, missing both the two-win advancement threshold and the neither-color-worse gate. No confirmation block is run. Fine-tuning a frozen value representation cannot extract a useful independent signal from a short target that is 0.9988-correlated with the long target; the auxiliary head and its stripped deployment candidate are rejected. The fresh labeled corpus and opt-in trainer remain for reproducibility, while the promoted checkpoint and accepted 128-visit search remain unchanged.
+
+### Shared global-context follow-up
+
+The same fresh strong-teacher corpus trained only the 12 existing global-residual adapter tensors, allowing the policy and value representations to respond jointly while every other tensor remained exact. Long-only and 0.25 short-blended targets were effectively identical after INT8. At learning rate 0.000003, the short-blended candidate improved fresh value MAE from 0.46762 to 0.46369 and offset-5,610,000 MAE from 0.50881 to 0.50717, but regressed independent policy loss from 2.86677 to 2.86832, lost one independent top-policy match, and regressed offset-5,660,000 value MAE from 0.59409 to 0.59646.
+
+Reducing the rate to 0.000001 and increasing policy-preservation weight from 0.25 to 1.0 did not restore the independent top-policy match. The most conservative candidates still regressed offset-5,660,000 value MAE and self-search value MAE. They were rejected offline without arena evaluation. Short-horizon supervision is retained as data infrastructure but is not a promoted Moka signal.
+
+## 2026-07-31 — Symmetry-uncertainty adaptive compute rejection
+
+### Offline uncertainty diagnostic
+
+Moka already evaluates all eight board symmetries at each real root. Their value standard deviation therefore supplies a free model-uncertainty signal before ordinary search. On the two disjoint current-player b18 corpora, symmetry spread strongly predicted absolute teacher-value error:
+
+| Corpus           | Positions | Pearson spread/error | Spearman spread/error | Bottom-quartile MAE | Top-decile MAE |
+| :--------------- | --------: | -------------------: | --------------------: | ------------------: | -------------: |
+| Offset 5,610,000 |     2,238 |                0.470 |                 0.619 |               0.176 |          0.798 |
+| Offset 5,660,000 |     2,199 |                0.487 |                 0.644 |               0.148 |          0.768 |
+
+Median spread was 0.103 in both corpora, the 90th percentile was 0.209–0.212, and the 95th percentile was 0.249–0.252. This is a materially better uncertainty diagnostic than the earlier top-two visit margin. An opt-in adaptive schedule now records trigger and extra-simulation counts and remains disabled by default.
+
+### Frozen schedules
+
+The first schedule used the exact accepted model and search, retained 128 visits everywhere, and extended roots with symmetry spread at least 0.20 to 256 visits. The threshold was frozen from the two offline distributions before play. On 20 fresh paired games from opening offset 5,770,000:
+
+| Search              | Wins | Black | White | Caps | Resignations | Adaptive roots | Extra simulations | Runtime |
+| :------------------ | ---: | ----: | ----: | ---: | -----------: | -------------: | ----------------: | ------: |
+| Fixed 128           |    7 |     3 |     4 |    0 |            1 |              0 |                 0 |  116.0s |
+| Spread ≥ 0.20 → 256 |    8 |     4 |     4 |    0 |            2 |             77 |             9,856 |  133.4s |
+
+The candidate gains one Black game while preserving White but misses the two-win advancement threshold, adds one resignation, and costs 15.0% more runtime.
+
+A separately motivated efficiency follow-up concentrated a similar average compute budget on the 95th-percentile tail: spread at least 0.25 received 512 visits. On 20 fresh paired games from opening offset 5,780,000, fixed 128 and the adaptive candidate tied exactly at nine wins, split four Black and five White, with zero caps and resignations. The candidate extended 54 roots by 20,736 simulations and cost 142.1 versus 116.4 seconds, a 22.1% increase.
+
+Symmetry spread is a valid predictor of leaf-value error, but allocating more visits to those roots does not reliably convert that diagnosis into stronger moves. Both schedules are rejected without confirmation. Fixed 128-visit MCTS remains accepted.
+
+## 2026-07-31 — Symmetry-hard value weighting rejection
+
+The same symmetry spread was tested as a training signal instead of a search-budget trigger. Two paired datasets retained every position and assigned weights
+
+`0.25 + 3.75 × min(spread / 0.25, 1)²`.
+
+The fresh 4,728-position corpus had mean weight 1.132; the offset-5,610,000 corpus had mean weight 1.236. The weighting moved expected error toward difficult roots: weighted absolute teacher error was 0.721 versus 0.482 on the fresh corpus and 0.644 versus 0.498 on offset 5,610,000.
+
+Matched uniform and weighted candidates used the same paired splits, random symmetries, seed, exact INT8-aware value-only materialization, and supplemental corpus. At learning rate 0.000001, fresh test MAE was 0.46712 for uniform training and 0.46739 for weighted training, versus 0.46762 for the incumbent. At learning rate 0.000003, the corresponding values were 0.46608 and 0.46663. The weighted candidate also failed to beat its uniform control consistently on offsets 4,720,000, 5,610,000, 5,660,000, the self-search corpus, or the older outcome corpus; its 90th-percentile errors were not consistently lower.
+
+Symmetry-hard weighting is rejected before arena evaluation. Disagreement identifies error but does not specify the direction of the correction, and emphasizing those rows gives a weaker update than ordinary teacher regression.
+
+## 2026-07-31 — Symmetry-value calibration rejection
+
+A zero-payload calibration used the mean and standard deviation of Moka's eight root-symmetry values. Coefficients were fit only on the fresh and offset-5,610,000 corpora, leaving offset 5,660,000, offset 4,720,000, self-search offset 5,400,000, and the older 16,028-position outcome corpus untouched.
+
+The fitted affine model was
+
+`0.9802 × mean − 0.7742 × mean × spread + 0.0630`.
+
+A zero-bias version was `0.9814 × mean − 0.9571 × mean × spread`. Both worsened MAE on every corpus. Their MSE improvements were distribution-dependent: the affine form improved the fresh and older outcome corpora but regressed both current-player corpora, the independent offset-4,720,000 corpus, and self-search. A sign-preserving spread expansion improved MAE but worsened MSE on three untouched sets and reached the edge of the preregistered coefficient grid, indicating unstable calibration rather than a defensible expected-value estimate.
+
+No calibration is implemented or screened. Symmetry spread remains useful as a diagnostic only.
+
+## 2026-07-31 — Handcrafted group-value residual rejected offline
+
+Primary-source research recommended that uncertain Go heuristics enter a learned residual rather than directly override value. A temporary prototype extracted 157 symmetry-invariant inputs from the frozen board representation: per-color stone and chain counts, chain sizes, liberty moments and buckets, stones in atari or on two liberties, distinct liberties, edge occupancy, surrounded empty-region summaries, game phase, recent passes, komi perspective, the frozen Moka value, and phase/value interactions. The residual was a regularized linear model trained by paired game split against native-b18 value error. It added no teacher access at inference and would require well below one kilobyte after quantization.
+
+Training on the fresh and offset-5,610,000 corpora improved their held-out MSEs from 0.45982 to 0.40711 and from 0.40566 to 0.34443. It nevertheless regressed the disjoint offset-5,660,000 corpus from 0.41592 to 0.42614. Adding offset 5,660,000 to training improved some independent MSEs—offset 4,720,000 from 0.31769 to 0.29839, self-search from 0.21910 to 0.20811, and the older outcome corpus from 0.43955 to 0.41795—but still worsened fresh test MAE, offset-5,660,000 test MSE, and two value-sign rates. Smaller 57- and 107-input versions generalized no better.
+
+The group features contain useful value information, but the correction is not stable across trajectory distributions and therefore fails the cross-corpus gate before arena play. Raw area, influence, liberty, eye, Euler, or Benson estimates will not be blended into win probability. A future learned heuristic module would require broader current-policy data and a nonlinear group-fate target rather than another static linear calibration.
+
+### Nonlinear residual and arena rejection
+
+A conservative nonlinear follow-up trained three independently seeded four-hidden-unit residuals on paired training splits from five disjoint b18-labeled corpora. Each residual was zero-initialized at its output, bounded to a maximum raw correction of 0.5, and the quantized ensemble correction was blended at weight 0.25. The artifact contained 711 int8 learned weights; its self-describing compressed NPZ was 3,086 bytes.
+
+The quantized ensemble reduced MSE on all eight offline safety sets. It reduced MAE on seven; the exception was a 64-position older test bucket, which moved by +0.0068. Value-sign agreement improved or held on seven; the independent offset-4,720,000 corpus lost three sign matches out of 495. Because every MSE held and the regressions were small, it advanced as an exploratory candidate with a frozen gate of at least two additional wins, neither color worse, no added cap or resignation, and runtime no more than 5% above control.
+
+The all-node residual passed its 20-game screen at opening offset 5,800,000:
+
+| Player             | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :----------------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Incumbent          |    8 |     5 |     3 |    0 |     45 |            1 |  120.8s |
+| Heuristic residual |   10 |     6 |     4 |    0 |     36 |            1 |  126.8s |
+
+It met every screen threshold exactly and was frozen without any coefficient or artifact change. On the fresh 40-game confirmation at opening offset 5,810,000, the gain reversed:
+
+| Player             | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :----------------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Incumbent          |   19 |    11 |     8 |    0 |    108 |            5 |  231.5s |
+| Heuristic residual |   18 |    11 |     7 |    0 |     93 |            3 |  251.8s |
+
+The candidate loses one White game and costs 8.8% more runtime, despite reducing passes and resignations. It fails strength and runtime confirmation gates.
+
+Because every training label described a real root while the failed candidate applied the residual throughout the tree, one topology isolation was run. Root-only correction on 20 fresh games from opening offset 5,820,000 reproduced control exactly: 11 wins, seven Black, four White, zero caps, 37 passes, one resignation, and 40 teacher passes. Runtime was 120.3 versus 120.5 seconds. The correction is too weak to change root allocation alone, while descendant application does not replicate. Both forms are rejected, and their inference integration is removed. The trained artifact remains an offline research record only; promoted weights and search remain unchanged.
+
+## 2026-07-31 — Root desired-visit funnel reversal
+
+KataGo exposes a root-only search mechanism that guarantees an already-entered child approximately `sqrt(policy × total visits × coefficient)` visits before ordinary utility can discard it. The mechanism does not force unvisited moves into the tree. It is relevant to Moka because the distilled policy is often more stable than its small value head, so a minimum evidence budget could prevent an early noisy value from suppressing a high-policy candidate.
+
+Coefficients 2 and 9 came from KataGo's own training and regression configurations. Both retained the exact checkpoint, 128 evaluations, accepted PUCT, FPU, opponent width, symmetry settings, and rules. The three-arm screen used 20 fresh paired games at opening offset 5,830,000.
+
+| Root coefficient | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| ---------------: | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+|                0 |    8 |     6 |     2 |    0 |     48 |            1 |  130.5s |
+|                2 |    8 |     6 |     2 |    0 |     47 |            1 |  133.9s |
+|                9 |   11 |     6 |     5 |    0 |     47 |            0 |  123.5s |
+
+Coefficient 2 reproduced control. Coefficient 9 uniquely gained three White games, preserved Black, and improved every safety counter. It was frozen without further tuning and advanced.
+
+The first 40-game confirmation at opening offset 5,840,000 was strongly positive:
+
+| Root coefficient | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| ---------------: | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+|                0 |   20 |    11 |     9 |    0 |     81 |            2 |  231.2s |
+|                9 |   25 |    14 |    11 |    0 |     88 |            1 |  233.0s |
+
+The final untouched 40-game replication at opening offset 5,850,000 reversed more strongly:
+
+| Root coefficient | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| ---------------: | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+|                0 |   22 |    11 |    11 |    0 |     82 |            3 |  232.8s |
+|                9 |   15 |     7 |     8 |    0 |     92 |            0 |  227.9s |
+
+Across both confirmations, the candidate trails 40–42, with 21–22 Black wins and 19–20 White wins. It reduces resignations but fails aggregate and both-color replication gates. The desired-visit implementation, constant, CLI, and tests are removed. Ordinary root PUCT remains accepted.
+
+## 2026-07-31 — Fresh 1,024-visit b18 distillation rejection
+
+### Stronger current-policy corpus
+
+The accepted checkpoint generated 32 fresh paired-color games from opening offset 5,860,000 with deterministic 128-visit MCTS against greedy b6c96. Native b18c384 then labeled every Moka turn at 1,024 visits, four times the prior current-policy teacher budget. The archive contains 1,086 positions from all 32 games, split by paired opening into 840 training, 110 validation, and 136 test positions. It includes visit policy, root value, child searched values and weights, ownership, and score lead.
+
+Teacher top-move agreement with Moka's played move is 47.2%. Root child weights sum to at least 1,023 and average 1,025; a small number of multithreaded analyses overran their nominal visit cap. The archive is 945,006 bytes with SHA-256 `dfd431268d0780bbcd8c5dc405d289af8777a32bd58896ce86bb081037c03457`. The intentionally absent counterfactual field contains its NaN sentinel; every used target is finite.
+
+### Initial QAT drift
+
+Matched adapter-only and full-network candidates used one epoch, paired splits, exact INT8-aware training, policy-preservation weight 0.25, seed 485, and both earlier current-policy corpora as training-only replay. Adapter rates were 0.000001 and 0.000003; full-network rates were 0.0000003 and 0.000001. All improved the new test loss, but every candidate regressed value calibration on the fresh 4,728-position teacher corpus and the older 16,028-position outcome corpus. None advanced.
+
+### Balanced rehearsal
+
+A fixed rehearsal archive sampled 1,000 paired-training positions from each safety corpus, using seed 486 and excluding their validation and test buckets. Repeating the matched candidates with the 2,000-position rehearsal produced one conservative offline candidate: full-network learning rate 0.0000003, seed 487. It changed all 120 existing tensors after exact INT8 materialization without adding a parameter.
+
+Relative to the incumbent, the candidate improved policy loss and value MAE on the new 1,024-visit test, both prior current-policy tests, fresh teacher replay, and older outcome replay. Its two small orthogonal regressions were offset-4,720,000 value MAE from 0.39128 to 0.39150 while policy loss improved, and self-search policy loss from 1.77327 to 1.77382 while value MAE improved. Value signs held on every reported safety set.
+
+The frozen 20-game screen used opening offset 5,870,000 and accepted 128-visit search:
+
+| Player                   | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :----------------------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Incumbent                |    9 |     6 |     3 |    0 |     53 |            2 |  132.1s |
+| 1,024-visit distillation |    8 |     6 |     2 |    0 |     53 |            1 |  130.0s |
+
+The candidate loses one White game. It fails the strength and neither-color-worse gates and is rejected without confirmation. Higher-visit labels improve static teacher metrics but still do not reliably improve this fixed-capacity player's decisions. The corpus and rehearsal archive remain for future analysis; promoted weights and search stay unchanged.
+
+### Policy-only isolation
+
+A narrower follow-up froze every tensor except the four policy-head tensors. The 1,024-visit corpus, both earlier current-policy corpora, balanced safety replay, and accepted 128-visit self-search replay supplied training data. Exact merge artifacts started from the accepted checkpoint and replaced only the policy convolution and linear tensors, avoiding otherwise non-idempotent requantization of frozen weights. Every value output was bit-exact.
+
+At learning rate 0.00001, policy cross-entropy improved on the new 1,024-visit test by 0.00309, offsets 5,610,000 and 5,660,000 by 0.00284 and 0.00358, independent offset 4,720,000 by 0.00395, fresh teacher replay by 0.00276, and older teacher replay by 0.00172. It nevertheless regressed the accepted self-search test by 0.00170 and lost top-move matches on three untouched sets. Learning rate 0.00003 magnified the self-search regression to 0.00711 and lost more top matches.
+
+The policy-only candidates fail the cross-distribution gate before arena play. Deeper teacher labels improve teacher likelihood but still move the distilled policy away from the distribution generated by Moka's accepted search. No policy-head candidate is promoted.
+
+## 2026-07-31 — Tiny ownership value signal rejected offline
+
+Primary-source research suggested a learned ownership estimate as a safer complement to value than raw liberties, eyes, influence, or area. A frozen-trunk probe trained one shared 32-to-1 pointwise projection against native-b18 ownership on paired training splits from four current-policy corpora. The head contained 33 parameters and left the accepted policy and value exactly unchanged.
+
+Across the four paired test buckets, ownership MSE ranged from 0.213 to 0.327, point-sign agreement ranged from 81.0% to 86.3%, and predicted ownership-sum correlation with KataGo score lead ranged from 0.69 to 0.87. The head learned meaningful board ownership, but its proposed value correction was almost independent of the remaining teacher error: correction/error correlations ranged from -0.109 to +0.156.
+
+A frozen grid tested ownership-score scales from 5 to 40 points, blend weights from 0.025 to 0.25, and occupancy gates from zero to 60 stones. Every candidate regressed at least one held-out corpus; even the best minimum-regret setting worsened three of four and had negative aggregate improvement. This reproduces the earlier scalar score-head result from a spatial route. Ownership may remain useful as training supervision or endgame display, but it does not provide a defensible second win evaluator for the current trunk. No runtime head or arena candidate is retained.
+
+## 2026-07-31 — Exact Monte Carlo graph search runtime rejection
+
+A proper graph-search prototype addressed the main flaw in the earlier shared-value experiment. Exact states shared one recursively backed-up state value, while every parent retained independent edge prior and visit count. The state key included board, side to move, ko, move count, and the two recent moves used by Moka's features. Tests verified node sharing across transposed move orders, parent-local visits, and fixed simulation accounting. A two-game 16-visit smoke run completed normally with one win and zero caps.
+
+The frozen 20-game screen used opening offset 5,880,000, the accepted checkpoint, 128 visits, opponent width four, full symmetry settings, FPU 0.25, exploration 1.75, and value weight 1.25. Ordinary MCTS completed in 119.6 seconds with ten wins, split five Black and five White, zero caps, 41 Moka passes, and two resignations.
+
+The graph arm did not complete within more than 240 seconds and was stopped after already exceeding twice the complete control runtime. Recursive state-value recomputation repeatedly traversed shared descendant subgraphs during PUCT scoring, so the small transposition rate could not amortize its bookkeeping. The runtime gate was irrecoverably failed before an outcome aggregate existed. The graph implementation, CLI, and tests are removed; accepted tree MCTS remains unchanged.
+
+## 2026-07-31 — Current global-context ownership auxiliary rejection
+
+The existing training-only ownership and score network predated Moka's promoted global-residual architecture. The opt-in auxiliary model now supports the same global blocks and strips back to the matching deployment architecture after training. A regression test verifies that loading the promoted checkpoint into the auxiliary form preserves policy and value outputs exactly before optimization.
+
+Matched full-network continuations used the fresh 1,024-visit corpus, both earlier current-policy corpora, balanced safety replay, paired splits, one epoch, seed 491, and learning rates 0.000001 and 0.000003. The auxiliary arm added ownership MSE at weight 0.25; score supervision remained disabled. At both rates, ownership improved its matched control by only fourth-decimal amounts. Every continuation still regressed independent offset-4,720,000 value MAE and accepted self-search policy loss, so none entered play.
+
+A narrower seed-492 follow-up trained only the 12 existing global-context tensors and disposable auxiliary heads. Exact merges preserved every non-adapter deployment tensor byte-for-byte. At learning rate 0.000003, the ownership arm reduced the control's independent value regression from +0.00188 to +0.00081 but lost one independent top-policy match, worsened accepted-search policy loss, and surrendered most value gains on fresh and older replay. Learning rate 0.00001 amplified the same tradeoffs. Ownership supervision does not improve a matched continuation consistently enough to justify arena variance. The global-context auxiliary compatibility remains for reproducibility, but no weights are promoted.
+
+## 2026-07-31 — Deeper value-only continuation rejection
+
+The strongest 1,024-visit labels next trained only the six existing value-head tensors. Policy, trunk, and global-context tensors remained byte-identical. One-epoch exact-QAT candidates used random symmetry, paired splits, both current-policy corpora, and balanced fresh/older replay.
+
+Learning rates from 0.0000003 through 0.000003 produced very small value changes. The 0.000003 candidate improved new-corpus MAE by 0.00015, offset-5,660,000 by 0.00011, self-search by 0.00003, fresh replay by 0.00003, and older replay by 0.00007. It regressed independent offset-4,720,000 MAE by 0.00027 and offset-5,610,000 by 0.00002 without changing a reported value sign.
+
+The frozen candidate was screened on 20 paired games from opening offset 5,890,000:
+
+| Player            | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :---------------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Incumbent         |   11 |     5 |     6 |    0 |     38 |            2 |  123.6s |
+| 1,024-visit value |   11 |     5 |     6 |    0 |     38 |            2 |  123.0s |
+
+The aggregate is exactly unchanged and misses the two-win advancement gate, so no confirmation is run.
+
+Larger rates 0.00001 and 0.00003 finally changed value signs and search-relevant calibration, but regressed the independent offset-4,720,000 MAE by 0.0295 and 0.0159. Fourfold safety replay plus accepted-search replay improved fresh and old distributions but left that regression at 0.0263 for the stronger candidate. Adding the offset-4,720,000 training buckets worsened its untouched paired test by 0.0404, exposing opening-specific overfit rather than a missing sample mixture. These candidates are rejected offline. A 32-game deeper corpus is too narrow to produce a stable value-head update; broader fresh teacher coverage is required before more fine-tuning.
+
+## 2026-07-31 — Broad 512-visit current-player distillation rejection
+
+### Broader teacher corpus
+
+The accepted checkpoint generated 64 fresh paired-color games from opening offset 5,900,000 with deterministic 128-visit MCTS against greedy b6c96. Native b18c384 labeled every reached Moka turn at 512 visits. The resulting archive contains 2,232 positions and 36,581 searched child states. Paired opening splits produce 1,669 training, 299 validation, and 264 test positions. Teacher policies are normalized; searched child weights sum to at least 511 and average 512; the only nonfinite field is the intentionally absent counterfactual-value sentinel.
+
+The archive is 1,750,220 bytes with SHA-256 `fdb8de8989c39e37a826ccbf45705359e5d79773138c4ad73921f21c40b3a3dc`. Its teacher value has mean -0.0489 and standard deviation 0.9355. Moka's selected move agrees with the teacher top move on 43.0% of positions.
+
+### Value-only and balanced replay
+
+Value-only exact-QAT candidates used the new corpus with earlier 1,024- and 256-visit current-player corpora plus fresh, older, independent, and accepted-search replay. Larger steps improved the new matched test while moving at least one untouched value distribution backward. A fixed seven-domain archive then sampled 1,000 paired-training rows from every trajectory source, with replacement where necessary, so each source contributed equal optimization mass. The archive has SHA-256 `7ad3f7cfbb2e1e95151c617dcae087f3be49cbccc1ee923aebcb825b53222c4a`.
+
+Equal-domain value training reduced some matched errors but did not remove the distribution conflict. Predeclared parameter soups between the new-data and safety-heavy endpoints were nearly neutral after exact INT8 materialization. No value-only candidate advanced to play.
+
+### Full-network balanced replay
+
+A corresponding seven-domain policy-and-value archive contains 7,000 rows and has SHA-256 `be45733d426ca3817aa2249b7ee32979bdc2879ed92799c6a5bb9734e99e2d54`. Three one-epoch full-network exact-QAT candidates used seed 502 and learning rates 0.0000003, 0.000001, and 0.000003. They retained the exact 105,353-parameter architecture and changed only existing tensors.
+
+All three improved new-corpus policy loss and value MAE. The largest candidate also improved value MAE on every reported current-policy and independent corpus, but lost top-policy matches on the small offset-4,720,000 test and regressed accepted self-search policy loss. The candidates were therefore evaluated separately rather than selected from repeated tuning on one opening block.
+
+The 0.0000003 candidate tied its 20-game control at opening offset 5,910,000: both scored 11 wins with zero caps. The candidate shifted the color split from 6 Black / 5 White to 7 Black / 4 White and failed the neither-color-worse gate.
+
+The 0.000001 candidate used fresh opening offset 5,920,000. Its control scored 10 wins, split 4 Black / 6 White, with one capped repetition; the candidate scored the same 10 wins and color split with zero caps. Removing the capped game is useful but does not satisfy the two-win advancement gate.
+
+The distinct 0.000003 candidate used fresh opening offset 5,930,000:
+
+| Player    | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :-------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Incumbent |    8 |     6 |     2 |    0 |     43 |            0 |  121.5s |
+| Candidate |    8 |     6 |     2 |    0 |     47 |            0 |  129.4s |
+
+The largest update reproduces wins, colors, caps, and resignations exactly while costing 6.5% more measured runtime on this block. Across three distinct candidate scales and opening blocks, broader distillation improves static teacher metrics but produces no aggregate win gain. Every candidate is rejected without confirmation; the accepted checkpoint remains `moka-global-soup-exact-q50-int8-roundtrip.safetensors`.
+
+## 2026-07-31 — Broad child-Q ranking rejected offline
+
+The broad 512-visit corpus contains 1,657 searched action-ranking pairs under the existing minimum visit and value-gap thresholds. Its untouched paired test bucket contains 384 pairs across 119 active roots. The incumbent orders 58.9% correctly, or 56.4% after weighting by the teacher value gap, so the signal is neither saturated nor absent.
+
+A matched full-network experiment used the broad corpus plus the fixed seven-domain replay archive, one epoch, exact INT8-aware training, seed 503, learning rate 0.000001, and policy-preservation weight 0.25. The only difference between arms was child-Q ranking-loss weight zero versus 0.10.
+
+The ranking candidate and matched control both ordered 58.3% of untouched pairs correctly and had the same weighted accuracy of 56.0%. Mean teacher-versus-alternative logit margin moved only from 0.55274 to 0.55293. The candidate slightly worsened primary policy loss on the broad, 1,024-visit, and both 256-visit tests, lost one top-policy match on the second 256-visit corpus, and lost two top-policy matches on the fresh teacher replay. It is rejected without arena play. Broader child data do not make this pairwise auxiliary more effective than ordinary visit-policy distillation at the current quantized capacity.
+
+## 2026-07-31 — Positional superko rules correction
+
+The arena and Python search had enforced suicide and simple ko but not full-board repetition. This contradicted the positional-superko default used by KataGo's area rules and allowed a capped cycle to be scored by the current board area. The correction stores exact board bytes in a persistent linked history shared by search branches. A 256-bit no-false-negative filter skips the history walk for ordinary unseen positions; filter hits still compare full bytes, so hash collisions cannot make a legal repetition or reject a new board. Passing remains legal.
+
+Tests verify rejection of a repeated board, legal passing on an unchanged board, persistent branch history, simple capture, suicide, and existing search behavior. A deterministic legal-generation microbenchmark over 52,000 returned moves took 0.2280 seconds with only the current position and 0.2406 seconds with full histories, a 5.5% history-check overhead before neural inference.
+
+The known simple-ko block at opening offset 5,920,000 had scored ten wins, split four Black / six White, with one capped repetition. The capped game was a Moka-by-area result after 54 repeated positions among 62 unique states. Replaying the exact checkpoint and 128-visit search with positional superko produced:
+
+| Rules              | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :----------------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Simple ko          |   10 |     4 |     6 |    1 |     50 |            1 |  120.1s |
+| Positional superko |    9 |     3 |     6 |    0 |     52 |            1 |  133.1s |
+
+The former tenth win was the capped cycle itself; under the correct rule it resolves to a completed loss. This is not promoted as a strength gain, but it removes an invalid benchmark outcome and aligns future search and teacher data with real area-rule legality. The persistent implementation remains the research rules baseline. The checkpoint and website remain unchanged.
+
+## 2026-07-31 — Broad ownership-and-score multitask rejection
+
+KataGo's value representation jointly predicts win probability, score, and ownership. The broad 512-visit current-player corpus contains finite targets for all three. Across its paired train, validation, and test splits, ownership-sum correlates 0.950–0.956 with score lead. Score/value correlation ranges from 0.583 to 0.769, confirming that score supplies information not already identical to the scalar win target.
+
+A matched one-epoch experiment used the broad corpus, fixed seven-domain replay, seed 505, learning rate 0.000001, batch size 256, policy-preservation weight 0.25, and the exact promoted checkpoint. The candidate added training-only ownership and score heads with ownership weight 0.02 and score weight 0.10; its control omitted both gradients. Both deployment checkpoints stripped auxiliary tensors and were materialized through the same exact INT8 path, retaining 105,353 parameters and 434,455-byte research checkpoints.
+
+Relative to its matched control, the multitask candidate improved value MAE on the broad 512-visit test, 1,024-visit test, second 256-visit test, independent offset-4,720,000 test, and accepted-search test. It regressed the first 256-visit and fresh-teacher tests. The changes were small, and the shared continuation itself failed the independent safety gate:
+
+| Corpus                    | Incumbent MAE | Control MAE | Multitask MAE |
+| :------------------------ | ------------: | ----------: | ------------: |
+| Broad 512-visit           |       0.66078 |     0.65967 |       0.65947 |
+| Current 1,024-visit       |       0.38739 |     0.38713 |       0.38707 |
+| Current 256, offset 5,610 |       0.50881 |     0.50605 |       0.50611 |
+| Current 256, offset 5,660 |       0.59409 |     0.59292 |       0.59274 |
+| Independent offset 4,720  |       0.39128 |     0.39817 |       0.39726 |
+| Accepted-search replay    |       0.31594 |     0.31476 |       0.31462 |
+| Fresh teacher replay      |       0.46256 |     0.46012 |       0.46042 |
+
+Both continuations lose one independent value-sign match and regress independent MAE by more than 0.006. Joint spatial supervision softens that regression by 0.00091 but does not make the update safe. The candidate and matched control are rejected without arena play. Training-only ownership and score heads remain reproducible infrastructure; deployed weights, parameter count, and website remain unchanged.
+
+## 2026-07-31 — Logarithmic cPUCT replication rejection
+
+KataGo can increase exploration logarithmically as a node accumulates visits. The candidate used the official b18 self-play ratio `1.05 + 0.28 × log((N + 500) / 500)`, scaled so exploration still reached Moka's accepted 1.75 at 127 child visits. Its frozen coefficients were base 1.6503876859 and logarithmic weight 0.4401033829. Exploration therefore rose from 1.6504 at an unvisited node to 1.7034 at 64 visits and 1.7500 at 127 visits. The model, 128-evaluation budget, FPU, value weight, opponent width, symmetry aggregation, positional-superko rules, and every other setting remained fixed.
+
+The zero-log implementation reproduced ordinary PUCT and tests covered the calibrated endpoint and invalid visit counts. A one-game smoke run completed normally. The 20-game screen used fresh opening offset 5,940,000:
+
+| Search            | Wins | Black | White | Caps | Resignations | Runtime |
+| :---------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Constant 1.75     |   12 |     8 |     4 |    0 |            2 |  125.0s |
+| Logarithmic cPUCT |   14 |     8 |     6 |    0 |            2 |  125.7s |
+
+The candidate met the two-win screen gate exactly, preserved Black, improved White, and added no safety or runtime regression. Its coefficients were frozen before two untouched 40-game confirmations:
+
+| Opening offset | Search            | Wins | Black | White | Caps | Resignations | Runtime |
+| -------------: | :---------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+|      5,950,000 | Constant 1.75     |   10 |     7 |     3 |    0 |            1 |  256.1s |
+|      5,950,000 | Logarithmic cPUCT |   14 |     9 |     5 |    0 |            1 |  259.7s |
+|      5,960,000 | Constant 1.75     |   22 |    12 |    10 |    0 |            3 |  239.5s |
+|      5,960,000 | Logarithmic cPUCT |   20 |    11 |     9 |    0 |            3 |  262.1s |
+
+The first confirmation gains four games and two wins as each color. The final preregistered replication reverses by two games, loses one win as each color, and costs 9.4% more runtime through changed trajectories. It fails the explicit final aggregate, both-color, and runtime gates.
+
+Across all 100 screen and confirmation games, the candidate leads 48–44, split 28 Black / 20 White versus 27 / 17, with zero caps and six resignations in both arms. Aggregate runtime is 647.5 versus 620.6 seconds, 4.3% higher. That aggregate direction is encouraging but does not override the untouched final-block failure or establish a reproducible improvement. Logarithmic cPUCT is rejected; its constants, CLI, session state, helper, and tests are removed. Constant exploration 1.75 remains accepted.
+
+## 2026-07-31 — Direct-value and visited-policy FPU rejection
+
+KataGo blends a node's direct neural value into the first-play urgency baseline until search has visited enough of the node's policy mass. The frozen candidate combined that baseline with the previously implemented prior-mass reduction. For visited policy mass `rho`, direct value `V`, and running search mean `Q`, it used
+
+`B = (1 - rho²) × V + rho² × Q`
+
+and
+
+`FPU = B - 0.25 × sqrt(rho)`.
+
+The control retained the accepted constant `Q - 0.25`. Both arms used the exact accepted checkpoint, 128 evaluations, exploration 1.75, value weight 1.25, opponent width four, full branching, symmetry settings, positional-superko rules, and all other search behavior unchanged. The candidate added no model bytes or neural evaluations.
+
+The 20-game screen used fresh opening offset 5,970,000:
+
+| Player        | Wins | Black | White | Caps | Resignations | Runtime |
+| :------------ | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control       |    6 |     5 |     1 |    0 |            1 |  135.0s |
+| FPU candidate |   10 |     7 |     3 |    0 |            1 |  136.1s |
+
+The four-game gain improved both colors and met every advancement gate. The exact implementation was frozen before two untouched 40-game blocks:
+
+| Opening offset | Player        | Wins | Black | White | Caps | Resignations | Runtime |
+| -------------: | :------------ | ---: | ----: | ----: | ---: | -----------: | ------: |
+|      5,980,000 | Control       |   19 |     9 |    10 |    0 |            2 |  278.2s |
+|      5,980,000 | FPU candidate |   21 |    10 |    11 |    0 |            1 |  287.3s |
+|      5,990,000 | Control       |   21 |    11 |    10 |    0 |            1 |  271.8s |
+|      5,990,000 | FPU candidate |   20 |    11 |     9 |    0 |            2 |  269.3s |
+
+The first confirmation gains two games and one win as each color. The final replication reverses by one game, loses one White win, and adds one resignation. Across all 100 games, the candidate leads 51–46, split 28 Black / 23 White versus 25 / 21, with zero caps and four resignations in both arms. Aggregate runtime is 692.7 versus 685.0 seconds, 1.1% higher.
+
+The pooled direction is positive but does not override the preregistered final-block and neither-color gates. The candidate is rejected as non-reproducible. Its direct-value state, helper, CLI flag, propagation, and tests are removed. The accepted search retains constant FPU reduction 0.25 without visited-policy scaling, and the checkpoint and Million website remain unchanged.
+
+## 2026-07-31 — Recursive confidence-weighted value rejection
+
+KataGo can reduce the pessimistic bias caused when PUCT deliberately visits bad children. The candidate recursively recomputed each node value from its direct neural evaluation and visited children. Child weight `n` was multiplied by
+
+`(StudentT3CDF((q - mean(q)) / sqrt(1e-8 + 1 / (1.5 × sqrt(n)))) + 1e-4)^0.25`
+
+and renormalized to preserve total child weight. Exponent 0.25 was frozen from KataGo's analysis default. Exponent zero reproduced Moka's ordinary running mean exactly. The implementation used the analytic Student-t-three CDF, added no model bytes or neural evaluations, and was tested for distribution symmetry, single-child invariance, bad-child downweighting, and the disabled control.
+
+The 20-game screen used the exact accepted checkpoint, fixed 128 evaluations, accepted search settings, positional-superko rules, and fresh opening offset 6,000,000:
+
+| Player                     | Wins | Black | White | Caps | Resignations | Runtime |
+| :------------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control                    |    8 |     2 |     6 |    0 |            3 |  154.6s |
+| Confidence-weighted backup |    9 |     3 |     6 |    0 |            2 |  245.6s |
+
+The candidate gains one Black game, preserves White, and removes one resignation, but misses the two-win advancement threshold. Its recursive on-demand subtree aggregation costs 58.9% more runtime, far beyond the 5% gate. It is rejected without coefficient tuning or confirmation. The implementation, CLI, constants, direct-value state, and tests are removed. A future revisit would require an incrementally maintained O(1) backup, but the observed one-game edge does not justify that work now. The accepted search, model, and website remain unchanged.
+
+## 2026-07-31 — Learned chain-fate value residual rejected
+
+Primary-source research found a narrow role for classical Go knowledge. Strict Benson analysis is sound for rare pass-alive proofs, but liberties, eyes, connectivity, influence, and territory estimates are not reliable enough to override a neural win estimate directly. The best untried design was therefore a tiny learned chain-fate model: compute symmetry-invariant local features, learn each chain's final survival from native-b18 ownership labels, aggregate the predictions into a board signal, and fit only a bounded residual to Moka's frozen value.
+
+The first model used 14 inputs per chain: relative color, chain size, liberties, liberty-to-size ratio, one- and two-liberty flags, adjacent enemy groups, weakest enemy liberties, capturable enemy stones, Benson vital regions, strict pass-alive status, edge exposure, contact with the last move, and occupied fraction. A shared `14 → 4 → 1` tanh network trained for 60 fixed-seed epochs. Its sign-preserving value correction was capped at 0.15 in logit space, so it could recalibrate confidence but could not reverse Moka's predicted winner.
+
+Whole-corpus leave-one-domain-out validation used three independent current-policy archives containing 2,238, 2,199, and 2,232 positions. The ownership target was the mean native-b18 ownership over each chain. No held-out domain contributed either chain weights or the value coefficient.
+
+| Held-out corpus  | Chain Brier | Color/phase baseline | Residual correlation | Raw value MSE | Corrected MSE | Raw MAE | Corrected MAE | Sign changes |
+| :--------------- | ----------: | -------------------: | -------------------: | ------------: | ------------: | ------: | ------------: | -----------: |
+| Offset 5,610,000 |     0.08424 |              0.12580 |               0.2865 |       0.43941 |       0.42661 | 0.49897 |       0.48586 |            0 |
+| Offset 5,660,000 |     0.09235 |              0.13110 |               0.2472 |       0.43391 |       0.42562 | 0.48838 |       0.47763 |            0 |
+| Offset 5,900,000 |     0.08772 |              0.12491 |               0.3541 |       0.42544 |       0.40902 | 0.48113 |       0.46304 |            0 |
+
+The compressed sidecar is 1,845 bytes with SHA-256 `480856bc47f19d9a14b4902da8c8630fd8553a7471d197392d99aaa31858c508`. It passed the preregistered offline gates: better chain calibration, positive residual correlation, lower value MSE and MAE on all three domains, exact sign preservation, artifact round-trip, and symmetry invariance.
+
+The first 20-game screen used opening offset 6,010,000, the accepted checkpoint, positional superko, 128 evaluations, exploration 1.75, value weight 1.25, opponent width four, and the full accepted symmetry configuration.
+
+| Player     | Wins | Black | White | Caps | Resignations | Runtime |
+| :--------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control    |    9 |     3 |     6 |    0 |            1 |  154.6s |
+| Chain fate |   11 |     5 |     6 |    0 |            1 |  173.7s |
+
+The candidate met the strength gate exactly and improved only Black, but cost 12.4% more runtime. Profiling showed duplicated Python group and Benson traversals dominated the sidecar rather than its tiny MLP. A semantics-preserving rewrite decomposed all chains once and cached the 81 possible adjacency queries. Every artifact tensor remained exactly equal. Feature extraction over 1,000 archived positions fell from approximately 0.385 to 0.154 seconds. The same screen then reproduced every outcome and safety count, but the fair post-optimization timing was still 127.2 seconds for control and 143.2 seconds for chain fate, a 12.6% regression. The per-leaf Benson features fail the runtime gate even after removing their redundant work.
+
+A cheap ablation replaced vital-region and Benson features with shared enemy liberties and second-order liberties. It ran in approximately 0.071 seconds per 1,000 positions, but one held-out residual correlation fell to 0.1847 and one corrected MSE improved by only 0.00009. It failed the frozen offline gate and received no arena run.
+
+One final evidence-backed feature set added real-eye support and connectable friendly chains. It retained only local group information and needed approximately 0.097 seconds per 1,000 positions. Its 16-input sidecar is 1,896 bytes with SHA-256 `1c10a4377f89d2ec95efddee956ff5e973ba71183cd179f044a708d70d23ecff`.
+
+| Held-out corpus  | Chain Brier | Color/phase baseline | Residual correlation | Raw value MSE | Corrected MSE | Raw MAE | Corrected MAE | Sign changes |
+| :--------------- | ----------: | -------------------: | -------------------: | ------------: | ------------: | ------: | ------------: | -----------: |
+| Offset 5,610,000 |     0.06968 |              0.12580 |               0.2613 |       0.43941 |       0.42771 | 0.49897 |       0.48602 |            0 |
+| Offset 5,660,000 |     0.07768 |              0.13110 |               0.2664 |       0.43391 |       0.42254 | 0.48838 |       0.47382 |            0 |
+| Offset 5,900,000 |     0.07305 |              0.12491 |               0.3128 |       0.42544 |       0.40928 | 0.48113 |       0.46389 |            0 |
+
+This stronger offline candidate used a fresh 20-game screen at opening offset 6,020,000:
+
+| Player           | Wins | Black | White | Caps | Resignations | Runtime |
+| :--------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control          |   13 |     7 |     6 |    0 |            0 |  121.3s |
+| Cheap chain fate |    8 |     4 |     4 |    0 |            3 |  138.3s |
+
+It loses five games, regresses both colors, adds three resignations, and remains 14.0% slower because the changed trajectories are substantially longer. It is rejected without tuning or confirmation. The arena flag and evaluator integration are removed. The trainer, extractor, tests, and offline artifacts remain as reproducible negative evidence.
+
+The adjacency cache remains independently useful. It does not alter legal moves or evaluation outputs, all focused tests pass, and the repeated control at offset 6,010,000 preserved every win, color, cap, pass, and resignation count while reducing measured runtime from 154.6 to 127.2 seconds. Future classical logic should stay out of every MCTS leaf: use Benson only for exact late proofs, or distill a broader group-fate signal into the existing value network so inference has no Python sidecar.
+
+## 2026-07-31 — Chain-fate distillation rejected offline
+
+The validated local chain-fate model was next used only as an offline teacher. A deterministic generator evaluated the accepted checkpoint on a broad 16,028-position paired replay archive, applied the frozen sign-preserving chain correction, and wrote corrected targets without adding a deployment tensor or runtime feature scan. The full correction changed 15,980 values by mean absolute 0.05393 and maximum 0.14887. A numerical audit caught and fixed float32 underflow in the original sign clamp before training; the final archive has zero sign changes. A correction scale of zero now reproduces every incumbent target bit-exactly.
+
+Matched one-epoch value-head QAT arms used seed 510, learning rate 0.00001, random symmetry, policy-preservation weight 0.25, and the fixed 7,000-position value safety replay. Exact prefix materialization replaced only the six `value_*` tensors; all 114 policy, trunk, and global-context tensors remain byte-identical. The prefix merge is now a tested option in the general INT8 materializer rather than an ad hoc artifact rewrite.
+
+The chain-corrected candidate failed matched-control arbitration. Its MAE was worse than the zero-correction arm on seven of nine safety sets, including both current-player offset 5,660,000 and 5,900,000 corpora, the 1,024-visit corpus, fresh b18 replay, older replay, and the 16,028-position outcome-teacher corpus. It was narrowly better only on independent offset 4,720,000 and accepted self-search. The correction therefore adds no stable information beyond ordinary safety rehearsal and receives no arena run.
+
+The zero-correction arm improved most pointwise metrics but regressed independent offset-4,720,000 MAE from 0.43661 to 0.43802 and lost one value-sign match. It also lost two sign matches on offset 5,900,000. A smaller predeclared learning rate of 0.000003 reduced drift but regressed MAE or sign agreement on offsets 5,660,000, 5,860,000, and 4,720,000, fresh b18 replay, the 16,028-position corpus, and older replay. Both rehearsal continuations are rejected offline. The accepted checkpoint remains unchanged.
+
+## 2026-07-31 — Recovered-compute visit scaling rejection
+
+The exact adjacency cache had reduced a deterministic 128-visit control from 154.6 to 127.2 seconds. A fixed 152-visit budget reinvested the measured 18% speed recovery into 18.75% more ordinary PUCT simulations without changing model, rules, symmetry, branching, or search parameters.
+
+On 20 fresh paired games from opening offset 6,030,000, 128 visits scored 11 wins, split six Black and five White, with zero caps, two resignations, and 147.2 seconds. The 152-visit arm scored seven, split four Black and three White, with zero caps, three resignations, and 148.3 seconds. Its shorter losing games conceal the additional evaluation work in wall time. It loses four games, regresses both colors, and adds a resignation. The candidate is rejected without another visit-count sweep.
+
+## 2026-07-31 — Batch-eight 512-visit revisit rejected
+
+Earlier Moka versions found that eight-leaf PUCT waves retained most sequential 512-visit strength while batching neural inference. The current implementation still supports independent leaf reservations and batched backup, but its accepted constant remained one-leaf sequential search. A narrowly preregistered revisit compared sequential 128 visits with batch-eight 512 visits on 20 fresh paired games from opening offset 6,040,000.
+
+| Search          | Wins | Black | White | Caps | Resignations | Runtime |
+| :-------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Sequential 128  |   10 |     7 |     3 |    0 |            1 |  150.3s |
+| Batch-eight 512 |   11 |     7 |     4 |    0 |            1 |  252.4s |
+
+The candidate preserves Black, adds one White win, and preserves safety, but misses the fixed two-win advancement gate while costing 67.9% more wall time. No 1,024-visit escalation is run. The batch constant is restored to one; accepted search remains sequential 128-visit PUCT.
+
+## 2026-07-31 — Broad 256-game strong-teacher corpus
+
+The accepted 128-visit player generated 256 paired-color games from opening offset 6,050,000. Native b18c384 labeled every reached Moka turn at 512 visits, producing 8,754 roots and 146,002 child states. Paired opening splits contain 6,964 training, 929 validation, and 861 test roots. The compressed archive is 6,768,838 bytes with SHA-256 `125ef7604fe29173da907a5f528896279497ea34cbea55fac9e42d78384b72ca`.
+
+All feature, policy, root-value, child-value, ownership, and score arrays are finite. Counterfactual values retain their intentional nonfinite sentinel. Teacher edge visits sum to 511 or 512 with mean 511.994, policies sum to one within floating-point tolerance, and all 8,754 feature rows are unique. Exact feature comparison found no overlap with the offset-5,610,000, 5,660,000, 5,860,000, or 5,900,000 current-player corpora.
+
+The first complete labeling pass analyzed all positions but could not persist them because native KataGo ignored EOF for more than 30 seconds during shutdown. The engine wrapper now closes input, waits, terminates after the timeout, and kills only if termination also fails. Tests cover both fallbacks. Repeating the identical generation then wrote the audited archive successfully rather than losing completed teacher work.
+
+## 2026-07-31 — Learned heuristic adapter rejected offline
+
+A zero-initialized 3×3 adapter derived three board planes from existing inputs: current-player stones with at least three liberties, opponent stones with at least three liberties, and occupied-board fraction. It injected those planes before Moka's frozen trunk and added 896 parameters. Exact prefix materialization preserved every shared tensor byte-for-byte, zero initialization reproduced policy and value outputs exactly, and batched 128-position MLX inference remained approximately unchanged at 2.72 versus 2.73 milliseconds.
+
+One exact-QAT epoch trained only the adapter on the new corpus plus fixed balanced replay, using seed 512, learning rate 0.00001, and policy-preservation weight 0.25. It improved the new test policy cross-entropy by 0.02312, top-move agreement by 0.12 percentage points, value MAE by 0.00835, and value-sign agreement by 1.16 points.
+
+The gain did not generalize. Top-move agreement regressed 1.64 points on offset 5,610,000, 3.23 points on independent offset 4,720,000, and 1.06 points on accepted-search replay. Value MAE regressed by 0.00597 on strong-teacher replay and by 0.00147 on older replay, with additional sign regressions on offsets 5,660,000, 5,900,000, 4,720,000, and strong-teacher replay. The adapter is rejected before arena play without a learning-rate sweep.
+
+## 2026-07-31 — Broad full-network continuation rejected offline
+
+A single fixed full-network continuation tested whether the broader corpus helped without a handcrafted adapter. It used one exact-QAT epoch, seed 513, learning rate 0.000001, policy-preservation weight 0.25, and the same balanced replay. The candidate improved new-corpus policy loss by 0.01088, top agreement by 0.35 points, and value MAE by 0.00099. Most current-policy and strong-teacher metrics also improved.
+
+It nevertheless regressed independent offset-4,720,000 top agreement by 3.23 points, value MAE by 0.00240, and sign agreement by 1.61 points. Accepted-search policy loss worsened by 0.00358, older replay lost 0.77 points of top agreement, and offset-5,900,000 lost 0.38 points of sign agreement. The candidate fails the frozen safety gate and is rejected before arena variance.
+
+## 2026-07-31 — Retained action-value prior rejected
+
+### Tiny searched-action head
+
+Earlier direct Q heads replaced Moka's evaluator, were poorly calibrated, and collapsed in play. This experiment instead froze all 105,353 accepted parameters and fit a retained 34-parameter linear head solely for the initial value of unvisited MCTS actions. Each board action uses its local 32-channel trunk vector; pass uses the pooled trunk vector. A shared log-policy coefficient and pass bias complete the head. The prediction is bounded to ±0.25 and centered over the legal expanded actions before it modifies ordinary `Q - 0.25` FPU. Visited child values remain ordinary neural-search backups.
+
+Ridge fitting used 30,448 searched sibling pairs from five current-player corpora, requiring four edge visits and a teacher-Q gap of at least 0.02. The accepted policy already ordered 80.5%–92.2% of validation pairs correctly. The joint policy-and-trunk ranker improved all five validation sets by 1.42–4.63 percentage points. On untouched tests it improved three sets by 0.89–2.35 points, tied one, and regressed the 1,024-visit set by 0.45 points. Every accepted policy and scalar-value tensor remained byte-identical; the checkpoint adds only `action_value_spatial.weight`, `action_value_pass_bias`, and `action_value_policy_scale`.
+
+An audit caught raw predictions near -5 for extremely low-policy moves, outside the searched training support. The deployed experimental path therefore bounds the prior before arena play. Unit weight still proved too aggressive on the 20-game screen at opening offset 6,100,000:
+
+| Player                         | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :----------------------------- | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Control                        |   11 |     6 |     5 |    0 |     40 |            0 |  126.7s |
+| Action-value prior, weight 1.0 |    8 |     5 |     3 |    0 |     53 |            1 |  143.0s |
+
+One final conservative quarter-strength arm used fresh opening offset 6,110,000. It passed the screen by three wins while preserving White and reducing Moka passes:
+
+| Player                          | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :------------------------------ | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Control                         |    4 |     1 |     3 |    0 |     59 |            1 |  129.6s |
+| Action-value prior, weight 0.25 |    7 |     4 |     3 |    0 |     41 |            2 |  133.9s |
+
+The frozen 40-game confirmation at opening offset 6,120,000 reversed:
+
+| Player                          | Wins | Black | White | Caps | Passes | Resignations | Runtime |
+| :------------------------------ | ---: | ----: | ----: | ---: | -----: | -----------: | ------: |
+| Control                         |   21 |    12 |     9 |    0 |     97 |            3 |  272.8s |
+| Action-value prior, weight 0.25 |   20 |    12 |     8 |    0 |     73 |            1 |  272.3s |
+
+The prior consistently reduces redundant passes, but it does not improve confirmed wins and loses one White game. A second confirmation is not run. The head, fitting utility, bounded search integration, and tests remain research infrastructure; the accepted checkpoint and default zero-weight search are unchanged.
+
+A fixed 34→8→1 tanh ranker then tested whether the linear head lacked capacity. It used 288 parameters, seed 514, smooth-L1 searched-gap regression, AdamW at 0.001, and validation-only epoch selection. The selected third epoch reached 84.39% pooled validation order accuracy, below the linear head's 84.68%. On untouched tests it regressed the accepted policy by 1.56, 2.42, and 1.82 points on the broad, offset-5,610,000, and 1,024-visit sets respectively. It is rejected offline without a checkpoint or arena run. More action-head capacity does not rescue the unstable searched-Q signal.
+
+## 2026-07-31 — Equal-domain continuation rejected offline
+
+The broad offset-6,050,000 archive was four times larger than each earlier current-player corpus, so ordinary concatenation let one opening range dominate the gradient and validation metric. A deterministic merger now assigns unique pair-preserving game IDs and equal total sample weight to every domain separately within training, validation, and test. Weighted evaluation was corrected to honor those weights and to aggregate partial batches by weight rather than averaging batch means. Tests cover split preservation, equal-domain sums, excluded child arrays, unique remapped games, and zero-weight evaluation rows.
+
+Five current-player corpora at offsets 5,610,000, 5,660,000, 5,860,000, 5,900,000, and 6,050,000 produced 16,509 roots: 12,805 training, 1,896 validation, and 1,808 test. Each domain contributes approximately 2,561 training, 379 validation, and 362 test weight regardless of its raw row count. The 3,823,620-byte archive has SHA-256 `68fba6b55c2f81599e43bdcaf93ad33667ff5122776fecb2d36b681f4a1d5d17`.
+
+One preregistered exact-QAT candidate trained only the 12 existing global-context tensors for one epoch. It used seed 515, learning rate 0.000003, policy-preservation weight 0.25, the equal-domain archive, and the fixed 7,000-position safety replay. Exact prefix materialization preserved all other 108 tensors byte-for-byte and retained the 105,353-parameter, 434,471-byte checkpoint.
+
+The candidate improved the equal-domain test policy loss from 2.62675 to 2.62348, top agreement from 42.07% to 42.33%, value MAE from 0.52748 to 0.52590, and sign agreement from 79.93% to 80.24%. Per-domain policy loss improved on all five source tests. The untouched safety gate still failed:
+
+- independent offset-4,720,000 top agreement fell 3.23 percentage points;
+- accepted-search policy loss regressed by 0.00210 and lost one value-sign match;
+- strong-teacher value MAE regressed by 0.00429 and sign agreement fell 1.51 points;
+- older replay lost 0.58 points of top agreement and regressed value MAE by 0.00336;
+- source offsets 5,660,000 and 5,900,000 each lost a value-sign match rate despite lower MAE.
+
+Equal weighting removes corpus-size dominance but not the underlying target conflict. The candidate is rejected before arena play without a learning-rate or replay-ratio sweep. New opening ranges are required before another continuation; the accepted checkpoint and search remain unchanged.
+
+## 2026-07-31 — Fresh offset-7,000,000 arbitration corpus
+
+The accepted checkpoint generated 64 new paired-color games from opening offset 7,000,000 using stochastic raw-policy rollouts against greedy b6c96. Native b18c384 then labeled every reached Moka turn at 512 visits. The archive contains 2,830 roots and 51,326 searched child states, split by paired opening into 2,144 training, 348 validation, and 338 test roots.
+
+Every root feature is unique. Exact feature comparison found zero overlap with the offset-5,610,000, 5,660,000, 5,860,000, 5,900,000, and 6,050,000 current-player corpora. Required root arrays are finite, policies sum to one within float16 tolerance, and searched edge weights total 511 or 512 with mean 511.985. The archive is 2,370,251 bytes with SHA-256 `2c288854d07bfc96dda4c47ac3cf93332aec426a1488668bcd914c57a31c42c7`.
+
+This domain is not used for the next training update. It remains external arbitration data so a continuation cannot pass merely by fitting the new opening range that motivated it.
+
+## 2026-07-31 — Native KataGo uncertainty-target collection
+
+KataGo's analysis output exposes more direct signals than the previously collected ownership and scalar score lead. Auxiliary collection now also records searched score standard deviation, raw neural value, raw score lead, raw self-play score and standard deviation, short-term win and score error, and predicted time until the position resolves. These outputs are teacher labels only and are never queried by Moka at runtime.
+
+A live eight-visit query against the exact native b18c384 teacher verified all fields are available and finite on 9×9. The empty-board smoke response produced ownership shape 9×9, searched score standard deviation 4.369, short-term win error 0.04197, short-term score error 0.26855, and variance-time-left 2.323. Focused extraction, board-order, legacy-query, and engine-shutdown tests pass. Future disjoint corpora can therefore test an official learned uncertainty target rather than inferring confidence from symmetry disagreement or handcrafted volatility.
+
+## 2026-07-31 — Native optimistic-policy target collection
+
+KataGo's current search does not use a handcrafted tactical optimism bonus. Version-17 training emits separate normal, long-term optimistic, and short-term optimistic policies. The native model exporter selects output zero and short-term output five, and the search engine linearly interpolates their logits, equivalently taking a geometric blend of their probabilities before normalization. Current engine defaults use 20% optimistic policy at the root and 100% below the root. The optimistic target is trained from unexpectedly good short-horizon value or score outcomes normalized by the network's own predicted short-term error. KataGo reports this mechanism as worth roughly 40–90 Elo.
+
+Search-dataset generation can now retain the exact root game states, load the native b18c384 PyTorch checkpoint only after the native analysis engine has closed, and save legal-masked short-term `optimistic_policies`. The option is explicit and has no effect on legacy generation. Checkpoint and source arguments must be supplied together.
+
+A live one-game integration smoke at opening offset 9,000,000 generated 40 current-player roots with ordinary ownership, score, uncertainty, and optimistic-policy targets. All optimistic rows are finite, have shape 82, assign zero probability to illegal moves, and sum to one within float16 tolerance. On this deliberately small diagnostic, the teacher optimistic policy's top move agreed with the 8-visit searched move on 80.0% of roots versus 47.5% for accepted Moka. Cross-entropy to the searched visit distribution was 1.43170 for the optimistic policy versus 2.12568 for Moka. This is evidence that the signal is wired correctly, not a strength result; training and arena gates remain required.
+
+The candidate student is a 66-parameter frozen-trunk residual: one bias-free 32-to-1 pointwise policy correction, one 32-to-1 pooled pass correction, and one scalar rescaling of Moka's normal policy logits. Zero initialization reproduces the normal policy exactly. A 100-step learnability check on the 40-root smoke set reduced optimistic-target cross-entropy from 2.43770 to 2.26982 and raised top-move agreement from 40.0% to 62.5%; the learned logit scale was -0.398. This is an overfit diagnostic only. It shows that the tiny head can express part of the teacher signal before expensive disjoint-domain training.
+
+The full candidate is preregistered before its data exists: train only the 66 residual parameters on the offset-9,000,000 domain for at most 20 validation-selected epochs, using seed 520, AdamW at 0.003, batch size 256, random board symmetries, and paired-color splits. Offset 10,000,000 is the untouched optimistic-policy test. Advance only if test cross-entropy improves by at least 0.05 over Moka's normal policy and top-move agreement improves by at least three percentage points. Ordinary Moka policy and value outputs must remain bit-exact. A passing candidate receives one 20-game screen at fresh opening offset 9,500,000 with 128 visits, 20% optimistic root policy, and 100% optimistic descendant policy. It must gain at least two games, lose no wins as either color, add no caps or resignations, and stay within 5% runtime before any confirmation.
+
+## 2026-07-31 — Fresh offset-8,000,000 uncertainty corpus
+
+The accepted checkpoint generated another 64 paired-color stochastic raw-policy rollouts from opening offset 8,000,000 against greedy b6c96. Native b18c384 labeled every reached Moka turn at 512 requested visits, producing 2,800 unique roots and 48,538 child states. Pair-preserving buckets contain 2,109 training, 317 validation, and 374 test roots. Exact feature comparison found zero overlap with the sealed offset-7,000,000 domain.
+
+All required policy, value, ownership, score, raw-network, short-error, and variance-time arrays are finite. Policies sum to one after float16 storage. One of 2,800 roots reports 1,003 total edge visits rather than the requested 512; its largest edge counts appear in exact duplicate pairs. The raw archive remains unchanged, and this row must be excluded from any Q-weighted experiment. The other 2,799 rows report 511 or 512 visits. The 2,340,046-byte archive has SHA-256 `373d8e5fd64be7d9b6abec481a479604cfc7f93209fbad5b9c5e30408efc7d87`.
+
+A read-only predictability diagnostic froze Moka's trunk, pooled each channel by mean and maximum, and ridge-fit 65 coefficients to `log(short_winrate_error + 1e-4)` on paired training games. Relative to a training-mean baseline, explained error was 62.3% on training, 24.8% on validation, and 43.1% on test; prediction/target correlation was 0.789, 0.543, and 0.666. The official uncertainty signal is learnable from Moka's existing representation, but the validation gap is large and no independent domain exists yet. No uncertainty head or search weighting is advanced until the offset-9,000,000 corpus can test cross-domain calibration.
+
+## 2026-07-31 — Tiny optimistic-policy residual rejected offline
+
+The offset-9,000,000 full archive contains 2,864 unique roots and replayable move histories. Its 2,643,308-byte file has SHA-256 `8f1802094e886ced5bd1b53a41114af7e3df9302f1e034203061d59aa14f1b7a`. A direct-policy-only offset-10,000,000 collector then generated 2,854 unique roots in 16 seconds without native search. The 385,644-byte untouched archive has SHA-256 `e9d5d9f65da1649887b3f146b594602b94b80fd9cc2d2c0fd1944aa7a5226ffd`. All optimistic targets are finite, normalize within float16 tolerance, retain their full histories, and have zero exact feature overlap across domains.
+
+The preregistered 66-parameter head selected epoch seven on offset-9,000,000 validation. On untouched offset 10,000,000, ordinary Moka policy had cross-entropy 2.39607 and 53.013% top-move agreement against native b18c384's short-term optimistic policy. The residual improved cross-entropy to 2.32274, clearing the 0.05 loss gate by 0.02333, but top-move agreement remained exactly 53.013%, missing the required three-point gain. Its scalar logit correction learned -0.290, showing that most of the gain is temperature calibration rather than better move ordering.
+
+All 120 incumbent tensors remain byte-identical, ordinary policy and value outputs are bit-exact on 128 audited roots, and the four new tensors contain exactly 66 parameters. The 435,038-byte candidate has SHA-256 `e011a3fa90229c894ca3e4d875dc49bfcbd71cc2530e2f93d798e99350c52df8`. It is rejected before arena play according to the frozen gate. The result specifically falsifies a pointwise optimistic correction; it does not falsify the teacher signal, whose unseen-domain calibration improved materially.
+
+One capacity correction is preregistered from that failure mode before collecting another test domain. Keep the pointwise, pass, and scalar residuals, then add a rank-four global path: mean/max pool the frozen 32-channel trunk, project 64 to four ReLU features, and project those to 82 move corrections. The complete head is 654 parameters, or less than 1 KB at intended INT8 deployment, and its final projection is zero-initialized for exact incumbent behavior. Train on offsets 9,000,000 and 10,000,000 together for the same 20 validation-selected epochs, seed 522, AdamW 0.003, batch size 256, and random symmetries. Offset 11,000,000 is collected only after this design is frozen and remains untouched. The external gates remain a 0.05 cross-entropy improvement and at least three percentage points of top-move agreement, followed by the same 20-game arena gate at offset 9,500,000. No hidden-width or learning-rate sweep is allowed.
+
+The direct offset-11,000,000 collector produced 2,924 unique roots. The 393,828-byte sealed archive has SHA-256 `b7e902851ce0d3806033f289e6686d28ac93bf04b9801e9eee3e5816077da76a`. Rank-four training selected epoch 20. On this untouched domain, normal Moka scored cross-entropy 2.36694 and top agreement 55.301%; the candidate improved cross-entropy to 2.27813 but top agreement only to 55.609%. It clears the loss gate by 0.03881 and misses the top-move gate by 2.692 points. All 120 incumbent tensors remain exact; seven added tensors contain 654 parameters. The 437,671-byte checkpoint has SHA-256 `af51a3d5ba039893abd81f6e247db0b144fc0cfc55ecd992342df110068290c0`. It is rejected before arena play.
+
+Both rejected heads substantially improve probability calibration while barely changing argmax. A final loss-level test is preregistered before another domain is generated: keep the 654-parameter architecture and cross-entropy, and add a 0.25-weight hinge ranking loss requiring the teacher's top move logit to exceed the highest alternative by 0.25. Train on offsets 9,000,000 through 11,000,000 for 20 validation-selected epochs with seed 524 and otherwise identical settings. Offset 12,000,000 is the untouched test. The same 0.05 cross-entropy and three-point top-agreement gates remain. If it fails either, stop optimistic-head training rather than tuning the margin, weight, width, or learning rate.
+
+The offset-12,000,000 collector produced 2,824 roots. Its 383,801-byte archive has SHA-256 `758c5db504099413d4a41a9855c664a32e7becb06499ccd1c56cd90b853718e2`. On this untouched domain, normal Moka scored cross-entropy 2.34858 and top agreement 54.568%. The ranking-loss candidate scored 2.26728 and 55.135%: a strong 0.08130 calibration gain but only 0.567 percentage points of top-move gain. The 437,671-byte checkpoint has SHA-256 `912c5caa4e311b61a83e942426cac416e8e1a4e5dfee4eb18282fb5a6862173b`.
+
+The final top-move gate fails, so optimistic-head training stops without arena play or coefficient tuning. Across three independent domains, direct optimistic distillation consistently improves cross-entropy by 0.073–0.089 while changing too few preferred moves. This signal may still be useful in a future full-policy continuation, but a tiny frozen residual does not provide enough new move ordering to justify deployment. The accepted checkpoint and search remain unchanged.
+
+## 2026-07-31 — Official short-term uncertainty candidate
+
+KataGo weights neural evaluations by learned short-term uncertainty rather than adding a handcrafted territory, liberty, eye, or influence estimate to value. Its published search formula is `0.25 / (uncertainty + 0.25 / 8)`. This changes the statistical weight of a leaf backup while leaving the search budget, policy, value, rules, score, and legal moves untouched.
+
+The candidate is frozen before arena play. Fit one 65-parameter linear head on offset-8,000,000 only, using the mean and maximum of each frozen trunk channel to predict `log(short_winrate_error + 1e-4)` by closed-form ridge regression with coefficient one. Offset-9,000,000 is the independent calibration domain. Every incumbent tensor must remain byte-identical. Advance only if independent explained error exceeds 30% and correlation exceeds 0.60.
+
+Search uses the exact fixed coefficient 0.25 and maximum weight eight at both root and descendant evaluators. Ordinary simulation counts remain the compute budget, while uncertainty-weighted counts drive PUCT statistics and root selection. The one 20-game screen uses fresh paired openings from offset 9,500,000 and accepted 128-visit search. It must gain at least two wins, lose no wins as either color, add no caps or resignations, and stay within 5% control runtime. No coefficient, exponent, maximum-weight, architecture, or target sweep is allowed. A failure stops this candidate without confirmation.
+
+The fitted head reaches 24.793% explained error and 0.5429 correlation on offset-8,000,000 validation, then 44.802% and 0.6898 on the independent offset-9,000,000 domain. It clears both external gates. All 120 shared tensors are byte-identical; the two added tensors contain exactly 65 parameters. The 434,846-byte candidate has SHA-256 `0be8c8280b5076c4b1f8070908c875c83179f8176d02139989e238554fa4f704`.
+
+The frozen screen rejected the candidate:
+
+| Player                         | Wins | Black | White | Caps | Resignations | Runtime |
+| :----------------------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Control                        |   11 |     5 |     6 |    0 |            0 |  131.9s |
+| Official uncertainty weighting |   11 |     7 |     4 |    0 |            1 |  144.5s |
+
+The candidate ties overall, gains two Black games but loses two White games, adds a resignation, and costs 9.6% more wall time. It fails the overall, per-color, safety, and runtime gates. No coefficient or maximum-weight sweep and no confirmation are run. The learned target is real and cross-domain predictable, but using a tiny student's estimate to weight an entire MCTS backup is not calibrated well enough for stronger play. The optional head, exact formula, disabled arena flags, and tests remain reproducible research infrastructure. Accepted weights and default unit-weight search remain unchanged.
+
+## 2026-07-31 — Uncertainty-guided compute allocation candidate
+
+The failed weighting experiment changed every ancestor statistic, whereas uncertainty can instead identify positions where ordinary unit-weight PUCT deserves more computation. This is distinct from earlier top-two visit-margin and symmetry-spread schedules: the trigger is native KataGo's learned short-term win-error target distilled into Moka, and it cannot alter a policy, value, Q backup, or visit statistic directly.
+
+Eight-way root-symmetry averaging was audited because the production root evaluator uses all board views. On the independent offset-9,000,000 corpus, its predicted uncertainty has 50th, 75th, 90th, 95th, and 99th percentiles 0.00236, 0.01361, 0.02735, 0.03793, and 0.06159. The highest predicted decile has mean true short-term error 0.05974 versus 0.01348 elsewhere. The fixed trigger is therefore 0.027351776; it targets exactly the independently calibrated worst decile rather than a threshold selected by arena outcomes.
+
+The single candidate retains 128 ordinary simulations at every root and extends triggered roots to 256. It uses the uncertainty head only in the already-required root forward pass, keeps unit backup weights, and disables visit-margin and symmetry-spread triggers. The fresh 20-game paired screen begins at opening offset 9,510,000. It must gain at least two games, lose no wins as either color, add no caps or resignations, and remain within 15% control runtime. This runtime bound matches the prior worst-decile symmetry schedule and is frozen before play. No threshold, percentile, or ceiling sweep is allowed; failure ends uncertainty-guided allocation.
+
+The candidate is rejected:
+
+| Search                             | Wins | Black | White | Caps | Resignations | Adaptive roots | Extra simulations | Runtime |
+| :--------------------------------- | ---: | ----: | ----: | ---: | -----------: | -------------: | ----------------: | ------: |
+| Fixed 128                          |    9 |     3 |     6 |    0 |            0 |              0 |                 0 |  116.3s |
+| Predicted worst decile, 128 to 256 |   10 |     4 |     6 |    0 |            0 |            105 |            13,440 |  141.2s |
+
+The candidate gains one Black game, preserves White and safety, but misses the two-win gate and costs 21.4% more wall time. The trigger is active and selective, yet the additional ordinary search does not convert enough hard-position diagnosis into stronger decisions. Per the frozen design, no threshold, percentile, or visit ceiling is tuned. Both uncertainty backup weighting and uncertainty-guided allocation are closed. The optional prediction path remains disabled research infrastructure; accepted search remains fixed 128 visits.
+
+## 2026-07-31 — Dynamic variance-scaled cPUCT candidate
+
+KataGo's dynamic cPUCT changes fixed-budget allocation without adding visits or changing neural values. Every node tracks the first and second moments of its ordinary backed-up utilities. The exploration coefficient is multiplied by an empirical utility standard-deviation factor mixed with a small prior. High-variance fights explore more; stable positions exploit more. KataGo reports this mechanism as a material strength feature and explains why a single global exploration constant is statistically mismatched across different tactical regimes.
+
+The candidate preserves Moka's accepted base exploration 1.75, 128 simulations, value weight, FPU, policy, evaluator, symmetry, branching, rules, and root selection. It adopts KataGo's published utility standard-deviation prior 0.4, prior weight two, and scale 0.85 exactly. No logarithmic visit scaling or uncertainty weighting is included, isolating the variance mechanism. A zero scale reproduces incumbent selection and now remains the default.
+
+Before any arena play, a fixed offline arbitration uses seed 526 to sample 64 Black-to-move and 64 White-to-move roots from the paired test bucket of the independent offset-9,000,000 corpus. Both players search each state at 128 visits; the target is native b18c384's 512-visit top move. Advance only if dynamic cPUCT gains at least four aggregate matches and loses none for either color. A passing candidate receives one fresh 20-game paired screen at opening offset 9,520,000. It must gain at least two games, lose no wins as either color, add no caps or resignations, and remain within 5% runtime. No prior, weight, scale, or base-exploration sweep is allowed.
+
+Dynamic cPUCT fails the offline gate. The fixed control matched 64 of 128 teacher moves, split 36 Black and 28 White. Dynamic cPUCT matched 63, split 34 Black and 29 White. It changed ten selected moves, lost one match overall, and regressed Black by two. Runtime was effectively equal at 20.4 versus 20.1 seconds. No arena run and no parameter sweep are performed. The exact second-moment accounting, zero-default scale, and tests remain research infrastructure; accepted selection remains fixed-cPUCT.
+
+## 2026-07-31 — Root lower-confidence-bound selection candidate
+
+KataGo does not choose a move solely by maximum root visits. Among sufficiently visited children, it computes a lower confidence bound from the backed-up utility mean, second moment, and effective sample size, with a bounded high-variance prior for small samples. The best eligible LCB receives a conservative selection-weight boost. This can prefer a statistically stable move over a noisy move that narrowly accumulated more visits, without changing any search trajectory or inference cost.
+
+The implementation follows KataGo's modern fixed settings: five standard deviations and minimum child weight 20% of the most-visited child. It includes the small-sample variance prior and the fivefold selection-weight-gain guard. Root utility is negated from the child's perspective exactly once. Zero LCB deviations reproduces incumbent max-visit selection and remains default.
+
+The architecture and constants are frozen before measurement. It reuses the exact seed-526, 64-Black/64-White offline arbitration roots and cached control result from dynamic-cPUCT evaluation, avoiding another control search. Advance only if it improves the control's 64 teacher matches by at least four while preserving its 36 Black and 28 White matches. A passing candidate receives one fresh 20-game paired screen at opening offset 9,520,000 with the same two-win, neither-color-worse, safety, and 5% runtime gates. No LCB width or eligibility sweep is allowed.
+
+LCB selection reaches 67 of 128 teacher matches, split 35 Black and 32 White, while changing ten control decisions. It gains three overall and four White matches but loses one Black match. Runtime is unchanged at 19.7 seconds. It narrowly misses the four-match aggregate gate and violates the neither-color-worse gate, so it receives no arena run and no confidence-width or eligibility tuning. The zero-default implementation and exact uncertainty accounting remain research infrastructure; max visits remains accepted root selection.
+
+## 2026-07-31 — Frozen-trunk value residual diagnostic
+
+A closed-form 65-parameter ridge probe used offset-8,000,000 paired training roots to predict native b18c384 value error from mean/max pooled frozen trunk channels. It lowered independent offset-9,000,000 full-domain MSE from 0.17849 to 0.16265 and MAE from 0.24488 to 0.23421, motivating a read-only safety audit before any checkpoint or search integration.
+
+The broader test rejects it decisively. Although it improves sealed offset-7,000,000 MAE from 0.29721 to 0.27438, it reduces sign accuracy by 4.29 points on offset 5,660,000, 4.92 points on offset 5,900,000, 9.68 points on independent offset 4,720,000, and 1.84 points on fresh-teacher replay. It also worsens MSE on offsets 5,660,000, 5,860,000, 5,900,000, and 4,720,000. No candidate checkpoint or arena path is created. A small frozen-trunk linear correction can fit one modern opening domain but is not a stable win evaluator across Moka's trajectories.
+
+An equal-domain follow-up fit gave the five historical domains equal total weight rather than letting the largest archive dominate. It improved the combined held-out MSE from 0.47549 to 0.40235 and sign accuracy from 81.19% to 81.31%, but the apparent aggregate gain again hid incompatible domains. MSE worsened on offsets 7,000,000, 8,000,000, 9,000,000, 5,860,000, 5,900,000, and 4,720,000. Sign accuracy fell by 6.06 points on offset 5,900,000, 4.84 points on independent offset 4,720,000, and 2.51 points on fresh-teacher replay. Clamping every correction that would flip Moka's original value sign did not resolve the cross-domain MSE regressions. Equal weighting therefore does not make the frozen residual safe, and value-residual fitting is closed without creating a checkpoint.
+
+## 2026-07-31 — Constant 256-visit replication accepted for research
+
+The earlier constant-budget comparison was stronger than its original safety disposition suggested. Across a 20-game screen and 40-game confirmation, ordinary 256-visit PUCT beat the 128-visit control 36–27, split 17 Black / 19 White versus 13 / 14. Both arms had zero move caps. The candidate recorded five resignations versus three, but resignations were ordinary losses rather than awarded wins, and no evidence showed that they concealed recoverable games.
+
+A fresh preregistered replication used opening offset 9,520,000 for 40 paired games. The checkpoint, b6c96 opponent, positional-superko rules, root and descendant symmetry evaluation, geometric policy weight 0.125, exploration 1.75, value weight 1.25, FPU reduction 0.25, opponent width four, and every other setting were identical. Only the simulation budget changed.
+
+| Visits | Wins | Black | White | Caps | Resignations | Runtime |
+| -----: | ---: | ----: | ----: | ---: | -----------: | ------: |
+|    128 |   19 |     9 |    10 |    0 |            2 |  246.9s |
+|    256 |   28 |    13 |    15 |    0 |            1 |  516.1s |
+
+The candidate independently reproduces the exact nine-win aggregate gain, improves both colors, introduces no caps, and reduces rather than increases resignations. Pooling the two constant-budget experiments gives 64 wins for 256 visits versus 46 for 128 across 100 games. The color totals are 30 Black / 34 White versus 22 / 24, with zero caps in both arms and six versus five resignations. Runtime rises from 246.9 to 516.1 seconds on the fresh block, a 109.0% increase consistent with twice the inference budget.
+
+This is the strongest replicated search-only gain in the current program. The Python research arena default advances from 128 to 256 simulations. Browser and Million website budgets remain unchanged pending a separate interactive-latency screen. No model tensor, checkpoint, teacher, rule, or production asset changes.
+
+## 2026-07-31 — Exact legal-child generation optimization
+
+A deterministic profile of two 256-visit games found that node expansion spent 18.1 of 52.7 seconds in legal-child construction. The search first called `play_move` across all 82 actions to discover legality, then called it again for every retained action to construct the same child states. Reusing those first-pass states reduced the identical profiled trace to 45.5 seconds.
+
+The remaining hotspot recomputed adjacent chains independently for every candidate. The accepted implementation decomposes all board chains and liberties once per expansion, then derives every legal child from those exact groups. Positional superko, suicide, captures, simple-ko markers, histories, move counts, colors, and passes remain unchanged. An exhaustive differential fuzzer compared the optimized generator with independent `play_move` calls across 9,273 randomized states and 319,085 legal children, including 12,786 captures and 778 ko states. Every legal-move list, board, ko marker, pass count, move count, history, and next player matched exactly.
+
+The same two-game profile retained every outcome counter and fell from 52.7 to 42.0 seconds, with Python calls dropping from 193.4 million to 96.5 million. A full replay of the accepted offset-9,520,000 256-visit block was then bit-for-bit identical at the game level:
+
+| Implementation | Wins | Black | White | Caps | Moka passes | Resignations | Teacher passes | Runtime |
+| :------------- | ---: | ----: | ----: | ---: | ----------: | -----------: | -------------: | ------: |
+| Original       |   28 |    13 |    15 |    0 |          85 |            1 |             56 |  516.1s |
+| Optimized      |   28 |    13 |    15 |    0 |          85 |            1 |             56 |  429.0s |
+
+The 16.9% full-arena speedup preserves the complete 256-visit search rather than trading strength for latency. It is accepted as a semantics-preserving research optimization. Model weights, browser assets, and website settings remain unchanged.
+
+### Additional exact fast paths
+
+Two smaller accepted fast paths remove disabled work. A zero area-value weight now returns the network value before computing a full-board flood-fill score. The accepted PUCT configuration bypasses generic support calculations for disabled prior-mass FPU, Q normalization, child-Q shrinkage, variance-scaled exploration, and leaf reservations. Its direct scorer retains the same insertion-order tie behavior and arithmetic for value, prior, exploration, FPU, action-value residuals, and weighted visits.
+
+The direct scorer and generic scorer selected the identical child in focused differential tests. On an 81-child node, 100,000 selections fell from 8.041 to 2.007 seconds, a 4.0-fold selector speedup. Replaying the fresh 20-game sequential block preserved all semantic counters exactly: 12 wins, six per color, zero caps, 42 Moka passes, one resignation, and 40 teacher passes. The later wall time was invalid as comparative speed evidence because sustained profiling and arena work had materially changed system load, so it is not used for a performance claim.
+
+MLX graph compilation and recursive one-leaf simulation were rejected as performance paths. Compiled and ordinary outputs were bit-exact, but 2,000 batch-eight forwards took 2.680 versus 2.305 seconds. Four 256-visit roots produced identical recursive and batch-one trees, but recursion took 2.000 versus 1.933 seconds.
+
+## 2026-07-31 — Batch-two latency candidate rejected
+
+The smallest parallel-search approximation reserved two leaves before each inference call while retaining 256 nominal simulations. Its advancement gate required no loss of total or either-color wins, no added caps or resignations, and at least 15% lower full-arena runtime. The fresh matched block used opening offset 9,532,000.
+
+| Search         | Wins | Black | White | Caps | Resignations | Runtime |
+| :------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Sequential 256 |   12 |     6 |     6 |    0 |            1 |  251.0s |
+| Batch-two 256  |   14 |     7 |     7 |    0 |            0 |  276.8s |
+
+Batch two gains one game as each color and improves safety, but runtime increases 10.3% instead of falling 15%. Different, longer winning trajectories can hide inference throughput, yet the candidate was explicitly a latency experiment and fails its frozen gate. It is rejected without confirmation or a batch-width sweep. Sequential 256 remains the accepted research search.
+
+## 2026-07-31 — Preregistered 256-visit FPU recalibration
+
+Moka's accepted FPU reduction fell from 0.50 at 64 visits to 0.25 at 128 visits; the latter gained nine wins across two independent confirmations. Doubling the accepted budget again gives search twice as many opportunities to recover from an optimistic first leaf. The single extrapolated candidate is therefore 0.125 at 256 visits. No zero endpoint, intermediate value, or simultaneous exploration/value retuning is allowed.
+
+The matched 20-game screen uses fresh opening offset 9,534,000, sequential 256 visits, the accepted checkpoint, optimized but exact legal-child generation, full root and descendant symmetry inference, geometric policy weight 0.125, exploration 1.75, value weight 1.25, opponent width four, positional superko, and unchanged scoring and resignation behavior. Advance only if FPU 0.125 gains at least two games, loses no wins as either color, introduces no cap, and adds no resignation. A passing candidate receives one untouched 40-game confirmation before any default changes.
+
+| FPU reduction | Wins | Black | White | Caps | Resignations | Runtime |
+| ------------: | ---: | ----: | ----: | ---: | -----------: | ------: |
+|         0.250 |   10 |     6 |     4 |    0 |            2 |  334.6s |
+|         0.125 |    9 |     4 |     5 |    0 |            1 |  392.7s |
+
+The extrapolated reduction loses one game overall and two Black wins. It fails the aggregate and neither-color-worse gates despite gaining one White game and removing a resignation. No confirmation, zero endpoint, intermediate reduction, or coupled retuning is run. FPU reduction 0.25 remains accepted at 256 visits.
+
+## 2026-07-31 — Preregistered sequential 512-visit screen
+
+The accepted constant-budget evidence shows that fully sequential 256-visit PUCT gains exactly nine wins over 128 visits in each of two independent paired blocks. The next direct test-time-compute question is whether another exact doubling continues that strength curve without changing the model, rules, evaluator, policy, or search formula.
+
+One candidate is frozen before measurement: sequential 512 visits against the accepted sequential 256-visit player. Both arms use the accepted checkpoint, b6c96 opponent, positional-superko rules, exact legal-child generation, full root and descendant symmetry inference, geometric policy weight 0.125, exploration 1.75, value weight 1.25, FPU reduction 0.25, opponent width four, and identical scoring and resignation behavior. The matched 20-game screen uses fresh opening offset 9,536,000.
+
+Advance only if 512 visits gains at least two games overall, loses no wins as either color, introduces no move cap, adds no resignation, and remains within 2.25 times the control runtime. A passing candidate receives one untouched 40-game paired confirmation at opening offset 9,537,000. The confirmation must improve aggregate wins, preserve both colors, introduce no caps, and avoid additional resignations. No intermediate visit budget, batching change, search-parameter retuning, or adaptive schedule is allowed during this experiment.
+
+| Search         | Wins | Black | White | Caps | Resignations | Runtime |
+| :------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Sequential 256 |   11 |     7 |     4 |    0 |            1 |  484.7s |
+| Sequential 512 |   11 |     6 |     5 |    0 |            0 |  619.0s |
+
+The extra 256 simulations change the color mix but add no aggregate win and lose one Black win. They introduce no cap, remove one resignation, and cost 27.7% more wall time on the resulting shorter trajectories, but fail both the two-win advancement gate and the neither-color-worse gate. No confirmation or intermediate constant budget is run. Sequential 256 remains the strongest replicated research setting.
+
+## 2026-07-31 — Preregistered 256-visit exploration recalibration
+
+Exploration 1.75 was accepted under 64 visits and retained by a narrow 128-visit retest. The latter scored 10 wins at 1.75 versus nine at 2.0, while older one-leaf regimes repeatedly found 2.0 competitive. At 256 visits, a slightly broader tree has twice the subsequent budget to revisit an initially uncertain child. The single conservative candidate is therefore exploration 2.0; no wider coefficient or sweep is allowed.
+
+The experiment reuses the completed sequential-256 control from opening offset 9,536,000. The candidate uses those identical 20 paired games and changes only exploration from 1.75 to 2.0. The checkpoint, 256 visits, FPU reduction 0.25, value weight 1.25, opponent width four, full root and descendant symmetry, geometric policy weight 0.125, positional-superko rules, exact legal-child generator, scoring, and resignation behavior remain fixed.
+
+Advance only if exploration 2.0 gains at least two games, preserves the control's seven Black and four White wins, introduces no cap, adds no resignation, and remains within 5% runtime. A passing candidate receives one untouched 40-game confirmation at opening offset 9,538,000 with the same aggregate, color, safety, and runtime gates. No exploration interpolation, value or FPU retuning, batching, or adaptive schedule is permitted.
+
+| Exploration | Wins | Black | White | Caps | Resignations | Runtime |
+| ----------: | ---: | ----: | ----: | ---: | -----------: | ------: |
+|        1.75 |   11 |     7 |     4 |    0 |            1 |  484.7s |
+|        2.00 |   14 |     7 |     7 |    0 |            2 |  198.0s |
+
+Exploration 2.0 gains three wins, preserves Black, adds three White wins, and introduces no cap. It nevertheless adds one resigned loss and therefore fails the preregistered safety gate. The screen alone cannot promote the candidate.
+
+### Preregistered no-resignation causality audit
+
+A resignation is already scored as a Moka loss, but the extra resignation could conceal a recoverable game. A fresh matched audit therefore disables resignation identically in both arms by setting its area margin to zero. This is not a retroactive change to the failed screen gate: it is a new causal experiment on opening offset 9,538,000 that forces every game to reach two passes or the ordinary move cap.
+
+The control and candidate retain the same checkpoint, 256 visits, FPU, value weight, opponent width, symmetry, policy blend, positional-superko rules, and scoring; only exploration differs between arms. Exploration 2.0 advances only if it gains at least two of 20 games, loses no wins as either color, introduces no cap, and remains within 5% control runtime. A passing audit receives one untouched 40-game confirmation with the ordinary resignation setting at opening offset 9,539,000. No other coefficient or search mechanism is changed.
+
+| Exploration | Wins | Black | White | Caps | Cap wins | Runtime |
+| ----------: | ---: | ----: | ----: | ---: | -------: | ------: |
+|        1.75 |    8 |     2 |     6 |    2 |        0 |  213.3s |
+|        2.00 |    9 |     3 |     6 |    0 |        0 |  206.2s |
+
+The candidate gains one Black game, preserves White, eliminates two capped losses, and runs 3.3% faster. The causal audit shows that the extra resignation in the first screen did not create a false win, but the candidate improves by only one game rather than the required two. Across the two 20-game blocks, exploration 2.0 leads 23–19, split 10 Black / 13 White versus 9 / 10, but its second-block gain is not a strong independent replication. Per the frozen gate, no 40-game confirmation is run and exploration 1.75 remains accepted.
+
+## 2026-07-31 — 256-visit value-weight offline arbitration
+
+Value weight 1.0 was the unconfirmed runner-up in the 128-visit screen, where it scored 11 wins versus eight for accepted weight 1.25. The selected 1.5 candidate later failed its untouched arena confirmation, leaving 1.0 as a plausible lower-value-weight alternative at the newer 256-visit budget.
+
+Before any new arena game, a fixed offline arbitration used seed 526 to select 64 Black-to-move and 64 White-to-move roots from the independent offset-9,000,000 archive. Both players ran exact accepted 256-visit search, differing only in value weight. Native b18c384's 512-visit top move was the frozen target. A candidate had to improve aggregate agreement without losing either color to receive an arena screen.
+
+| Value weight | Teacher matches | Black | White | Runtime |
+| -----------: | --------------: | ----: | ----: | ------: |
+|         1.25 |              80 |    41 |    39 |   33.2s |
+|         1.00 |              77 |    39 |    38 |   33.9s |
+
+Weight 1.0 loses three aggregate matches and regresses both colors. It fails before arena play, and no intermediate value weight is screened. Value weight 1.25 remains accepted at 256 visits.
+
+## 2026-07-31 — Preregistered opponent-turn pondering
+
+Moka already advances its retained tree to the selected move and reuses the opponent's reply subtree when that reply was expanded. It previously stopped computing as soon as its current move was selected. In an interactive game, the interval before the opponent replies is available test-time compute. A new disabled-by-default path therefore runs additional ordinary MCTS simulations from the already-selected child after the current move is fixed and before the opponent move is known.
+
+Pondering cannot alter the move just returned. It uses only Moka's existing policy and value network, the existing tree, positional-superko rules, and the same PUCT settings. It has no teacher query, reply observation, rule heuristic, or hidden state. Search treats the ponder root as an opponent-to-move node while preserving Moka as the root player, so the accepted opponent width and value perspectives remain unchanged. If the observed reply was not retained, normal alignment discards the pondered branch.
+
+Focused tests prove that pondering leaves the selected move unchanged, adds exactly its requested simulation count to the selected subtree, reuses a retained reply, rejects negative budgets, and remains zero by default. A two-game smoke with 128 ponder simulations completed 1–1 with zero caps. It ran 9,216 extra simulations across 72 post-move roots; 52 of 70 resolved replies reused the pondered subtree and 18 were discarded, a 74.3% retention rate.
+
+One candidate is frozen before strength measurement: accepted sequential 256-visit search plus 128 post-move ponder simulations. The matched 20-game block uses fresh opening offset 9,540,000. The checkpoint, real-move visit budget, exploration 1.75, value weight 1.25, FPU reduction 0.25, opponent width four, full root and descendant symmetry, geometric policy weight 0.125, positional-superko rules, scoring, and resignation remain identical.
+
+Advance only if pondering gains at least two games, loses no wins as either color, introduces no cap, adds no resignation, and remains within 1.60 times control runtime. A passing candidate receives one untouched 40-game confirmation at opening offset 9,541,000 with the same aggregate, color, and safety gates. Runtime is recorded but the confirmation ceiling remains 1.60 because ponder work can execute while an interactive opponent is thinking. No ponder-budget sweep, adaptive trigger, coefficient retuning, or batching change is allowed.
+
+| Search           | Wins | Black | White | Caps | Resignations | Runtime |
+| :--------------- | ---: | ----: | ----: | ---: | -----------: | ------: |
+| Accepted 256     |   11 |     5 |     6 |    0 |            0 |  346.5s |
+| 256 + ponder 128 |    8 |     4 |     4 |    0 |            0 |  437.2s |
+
+The candidate runs 92,416 extra simulations over 722 post-move roots. Of 704 resolved opponent replies, 602 reuse the pondered subtree and 102 discard it, an 85.5% retention rate. Despite retaining most of the work, pondering loses three games, one Black win, and two White wins. Runtime rises 26.2%; caps and resignations remain zero.
+
+The failure is not an alignment or coverage problem. Spending more search from the opponent-to-move child concentrates Moka's limited evaluator on predicting and defending reply branches, but the resulting inherited statistics make its next real-root decisions worse. The candidate fails every strength gate and receives no confirmation or budget sweep. The pondering implementation, CLI, counters, and tests are removed; accepted sequential 256-visit search remains unchanged.
+
+## 2026-07-31 — Preregistered 256-visit policy iteration
+
+The first full-network distillation from Moka's accepted 64-visit search improved two independent 100-game blocks and passed exact-INT8 confirmation. Repeating the same recipe immediately failed. Much later, adapter-only distillation from the promoted 128-visit player led its control 42–40 across two 40-game confirmations, but its five-game first-block gain reversed by three in the second block and was not promoted. The current accepted 256-visit player is independently nine wins stronger than 128 visits in each of two paired comparisons, so its visit distribution contains a materially stronger policy-improvement operator than the last distillation target.
+
+The data recipe is frozen before collection. The exact accepted checkpoint plays 64 deterministic games against greedy b6c96 from opening offset 9,550,000. Moka uses accepted sequential 256-visit search, exploration 1.75, value weight 1.25, FPU reduction 0.25, opponent width four, full root and descendant symmetry, geometric policy weight 0.125, positional-superko rules, and margin-60 resignation. Only Moka decision positions are retained. Each policy target is 75% visit distribution and 25% legal eight-view root policy; b6 supplies scalar values. Complete paired games define train, validation, and test buckets.
+
+Exactly one candidate is allowed. It starts from the accepted exact checkpoint and trains only the existing 12 global-residual adapter tensors for one exact-quantization-aware epoch, batch size 256, learning rate 0.00001, seed 530, policy-preservation weight 0.25, and random board symmetries. The prior offset-5,400,000 accepted 128-visit corpus is supplemental training replay. No full-network arm, alternate seed, learning-rate sweep, hard target, target blend, or second epoch is permitted.
+
+Before arena play, the exact candidate must improve new-corpus test policy loss by at least 0.005 without losing top-move agreement, keep prior 128-visit test loss within 0.001 and top agreement unchanged or better, preserve independent offset-4,720,000 policy loss within 0.001 and value MAE within 0.001, and leave every non-adapter tensor byte-identical. A passing candidate receives one 20-game screen at fresh opening offset 9,560,000 using accepted 256-visit search. It must gain at least two wins, lose no wins as either color, add no cap or resignation, and remain within 5% runtime. A passing screen receives two untouched 40-game confirmations before any checkpoint change.
+
+Collection completed all 64 games and produced 2,205 Moka decision positions from 64 unique game IDs. The archive contains finite features, visit-policy targets, sample weights, search Q values and weights, and scalar values. Stored policy sums range from 0.9995117 to 1.0 after float16 serialization. The 423,673-byte corpus has SHA-256 `3054722bc167ee6b51f8649bc629e5853d67293721c2d7f79a02bb881a84b885`.
+
+Training and offline arbitration have not started. The frozen candidate recipe, required datasets, accepted checkpoint, and b6c96 teacher are bundled under `handoff-assets/` for continuation on a clean machine.

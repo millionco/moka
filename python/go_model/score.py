@@ -9,6 +9,7 @@ import numpy as np
 from go_model.config import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_EPOCH_COUNT,
+    DEFAULT_GAME_PAIR_SIZE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_RANDOM_SEED,
     SCORE_NORMALIZATION_POINTS,
@@ -20,6 +21,7 @@ from go_model.model import (
     MokaGlobalScoreNetwork,
     get_checkpoint_global_residual_block_interval,
 )
+from go_model.split import create_game_split_buckets
 
 
 def load_score_datasets(
@@ -98,12 +100,13 @@ def train_score_head(
     batch_size: int,
     learning_rate: float,
     random_seed: int,
+    game_pair_size: int,
 ) -> None:
     features, game_ids, score_targets = load_score_datasets(dataset_paths)
     test_features, _, test_score_targets = load_score_datasets(
         [test_dataset_path]
     )
-    buckets = game_ids % SPLIT_BUCKET_COUNT
+    buckets = create_game_split_buckets(game_ids, game_pair_size)
     training_indexes = np.flatnonzero(
         (buckets != VALIDATION_BUCKET_INDEX)
         & (buckets != TEST_BUCKET_INDEX)
@@ -226,6 +229,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_RANDOM_SEED,
     )
+    argument_parser.add_argument(
+        "--game-pair-size",
+        type=int,
+        default=DEFAULT_GAME_PAIR_SIZE,
+    )
     return argument_parser
 
 
@@ -240,6 +248,7 @@ def main() -> None:
         arguments.batch_size,
         arguments.learning_rate,
         arguments.seed,
+        arguments.game_pair_size,
     )
 
 

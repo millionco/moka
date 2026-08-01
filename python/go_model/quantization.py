@@ -42,14 +42,37 @@ def fake_quantize_int8_parameters(parameters: dict) -> dict:
 def materialize_int8_checkpoint(
     checkpoint_path: Path,
     output_path: Path,
+    base_checkpoint_path: Path | None = None,
+    parameter_prefixes: list[str] | None = None,
 ) -> None:
     parameters = mx.load(str(checkpoint_path))
     quantized_parameters = fake_quantize_int8_parameters(parameters)
     mx.eval(quantized_parameters)
+    output_parameters = dict(tree_flatten(quantized_parameters))
+    selected_prefixes = parameter_prefixes or []
+    if base_checkpoint_path is not None:
+        if not selected_prefixes:
+            raise ValueError(
+                "Exact checkpoint merge requires a parameter prefix."
+            )
+        base_parameters = mx.load(str(base_checkpoint_path))
+        matched_prefixes: set[str] = set()
+        for parameter_name, parameter_value in output_parameters.items():
+            for parameter_prefix in selected_prefixes:
+                if parameter_name.startswith(parameter_prefix):
+                    base_parameters[parameter_name] = parameter_value
+                    matched_prefixes.add(parameter_prefix)
+        unmatched_prefixes = set(selected_prefixes) - matched_prefixes
+        if unmatched_prefixes:
+            raise ValueError(
+                "No parameters matched prefixes: "
+                + ", ".join(sorted(unmatched_prefixes))
+            )
+        output_parameters = base_parameters
     output_path.parent.mkdir(parents=True, exist_ok=True)
     mx.save_safetensors(
         str(output_path),
-        dict(tree_flatten(quantized_parameters)),
+        output_parameters,
     )
     print(f"saved {output_path} bytes={output_path.stat().st_size:,}")
 
@@ -58,6 +81,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--checkpoint", required=True, type=Path)
     argument_parser.add_argument("--output", required=True, type=Path)
+    argument_parser.add_argument("--base-checkpoint", type=Path)
+    argument_parser.add_argument(
+        "--parameter-prefix",
+        action="append",
+        default=[],
+    )
     return argument_parser
 
 
@@ -66,6 +95,8 @@ def main() -> None:
     materialize_int8_checkpoint(
         arguments.checkpoint,
         arguments.output,
+        arguments.base_checkpoint,
+        arguments.parameter_prefix,
     )
 
 

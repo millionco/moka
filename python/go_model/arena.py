@@ -25,6 +25,8 @@ from go_model.config import (
     MINIMUM_TEACHER_PASS_MOVE_COUNT,
     SEARCH_AREA_VALUE_WEIGHT,
     SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT,
+    SEARCH_ADAPTIVE_SYMMETRY_VALUE_SPREAD_THRESHOLD,
+    SEARCH_ADAPTIVE_UNCERTAINTY_THRESHOLD,
     SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
     SEARCH_CHILD_Q_PSEUDO_COUNT,
     SEARCH_DESCENDANT_PUCT_EXPLORATION,
@@ -41,13 +43,19 @@ from go_model.config import (
     SEARCH_MAXIMUM_EXTRA_EVALUATION_BUDGET_SIMULATION_COUNT,
     SEARCH_OPPONENT_BRANCH_COUNT,
     SEARCH_PUCT_EXPLORATION,
+    SEARCH_PUCT_UTILITY_STDEV_PRIOR,
+    SEARCH_PUCT_UTILITY_STDEV_PRIOR_WEIGHT,
+    SEARCH_PUCT_UTILITY_STDEV_SCALE,
     SEARCH_PUCT_VALUE_WEIGHT,
     SEARCH_Q_VALUE_NORMALIZATION_ROOT_ONLY,
     SEARCH_Q_VALUE_NORMALIZATION_WEIGHT,
     SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
     SEARCH_ROLLOUT_DEPTH,
     SEARCH_SCORE_VALUE_WEIGHT,
+    SEARCH_SCORE_VALUE_START_MOVE_COUNT,
     SEARCH_ROOT_BRANCH_COUNT,
+    SEARCH_ROOT_LCB_MINIMUM_VISIT_PROPORTION,
+    SEARCH_ROOT_LCB_STDEVS,
     SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_ROOT_POLICY_TEMPERATURE_END_MOVE_COUNT,
     SEARCH_ROOT_SYMMETRY_ENSEMBLE,
@@ -60,6 +68,7 @@ from go_model.config import (
     SEARCH_ROOT_SYMMETRY_TRIMMED_POLICY_WEIGHT,
     SEARCH_ROOT_SYMMETRY_TRIMMED_VALUE_WEIGHT,
     SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT,
+    SEARCH_UNCERTAINTY_MAXIMUM_WEIGHT,
 )
 from go_model.features import (
     encode_moka_context_features,
@@ -252,6 +261,9 @@ def run_arena(
     search_value_weight: float = SEARCH_PUCT_VALUE_WEIGHT,
     search_area_value_weight: float = SEARCH_AREA_VALUE_WEIGHT,
     search_score_value_weight: float = SEARCH_SCORE_VALUE_WEIGHT,
+    search_score_value_start_move_count: int = (
+        SEARCH_SCORE_VALUE_START_MOVE_COUNT
+    ),
     search_rollout_depth: int = SEARCH_ROLLOUT_DEPTH,
     sequential_halving_candidate_count: int = (
         SEARCH_SEQUENTIAL_HALVING_CANDIDATE_COUNT
@@ -269,6 +281,9 @@ def run_arena(
         SEARCH_ADAPTIVE_MAX_SIMULATION_COUNT
     ),
     adaptive_visit_margin_ratio: float = SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    adaptive_symmetry_value_spread_threshold: float = (
+        SEARCH_ADAPTIVE_SYMMETRY_VALUE_SPREAD_THRESHOLD
+    ),
     use_global_pool_network: bool = False,
     opponent_branch_count: int = SEARCH_OPPONENT_BRANCH_COUNT,
     use_root_symmetry_ensemble: bool = SEARCH_ROOT_SYMMETRY_ENSEMBLE,
@@ -335,6 +350,24 @@ def run_arena(
     ),
     use_shared_root_evaluator: bool = False,
     use_global_residual_network: bool = False,
+    action_value_prior_weight: float = 0,
+    optimistic_policy_weight: float = 0,
+    root_optimistic_policy_weight: float = 0,
+    search_uncertainty_coefficient: float = 0,
+    root_uncertainty_coefficient: float = 0,
+    uncertainty_maximum_weight: float = SEARCH_UNCERTAINTY_MAXIMUM_WEIGHT,
+    adaptive_uncertainty_threshold: float = (
+        SEARCH_ADAPTIVE_UNCERTAINTY_THRESHOLD
+    ),
+    utility_stdev_prior: float = SEARCH_PUCT_UTILITY_STDEV_PRIOR,
+    utility_stdev_prior_weight: float = (
+        SEARCH_PUCT_UTILITY_STDEV_PRIOR_WEIGHT
+    ),
+    utility_stdev_scale: float = SEARCH_PUCT_UTILITY_STDEV_SCALE,
+    root_lcb_stdevs: float = SEARCH_ROOT_LCB_STDEVS,
+    root_lcb_minimum_visit_proportion: float = (
+        SEARCH_ROOT_LCB_MINIMUM_VISIT_PROPORTION
+    ),
 ) -> tuple[int, int, int]:
     model = create_moka_network_for_checkpoint(
         str(checkpoint_path),
@@ -363,6 +396,11 @@ def run_arena(
             descendant_symmetry_geometric_policy_weight
         ),
         score_value_weight=search_score_value_weight,
+        score_value_start_move_count=search_score_value_start_move_count,
+        action_value_prior_weight=action_value_prior_weight,
+        optimistic_policy_weight=optimistic_policy_weight,
+        uncertainty_coefficient=search_uncertainty_coefficient,
+        uncertainty_maximum_weight=uncertainty_maximum_weight,
     )
     root_evaluator = (
         MokaEvaluator(
@@ -390,6 +428,16 @@ def run_arena(
                 root_symmetry_top_move_vote_policy_weight
             ),
             score_value_weight=search_score_value_weight,
+            score_value_start_move_count=(
+                search_score_value_start_move_count
+            ),
+            action_value_prior_weight=action_value_prior_weight,
+            optimistic_policy_weight=root_optimistic_policy_weight,
+            uncertainty_coefficient=root_uncertainty_coefficient,
+            uncertainty_maximum_weight=uncertainty_maximum_weight,
+            predict_uncertainty=np.isfinite(
+                adaptive_uncertainty_threshold
+            ),
         )
         if use_root_symmetry_ensemble
         else None
@@ -417,6 +465,8 @@ def run_arena(
     teacher_pass_count = 0
     capped_repeated_position_count = 0
     capped_unique_position_count = 0
+    adaptive_extension_count = 0
+    adaptive_extra_simulation_count = 0
     start_time = time.perf_counter()
 
     for game_index in range(game_count):
@@ -450,6 +500,12 @@ def run_arena(
                     adaptive_visit_margin_ratio=(
                         adaptive_visit_margin_ratio
                     ),
+                    adaptive_symmetry_value_spread_threshold=(
+                        adaptive_symmetry_value_spread_threshold
+                    ),
+                    adaptive_uncertainty_threshold=(
+                        adaptive_uncertainty_threshold
+                    ),
                     opponent_branch_count=opponent_branch_count,
                     root_evaluator=root_evaluator,
                     root_selection_visit_slack=(
@@ -478,6 +534,15 @@ def run_arena(
                     ),
                     use_q_value_normalization_at_root_only=(
                         use_q_value_normalization_at_root_only
+                    ),
+                    utility_stdev_prior=utility_stdev_prior,
+                    utility_stdev_prior_weight=(
+                        utility_stdev_prior_weight
+                    ),
+                    utility_stdev_scale=utility_stdev_scale,
+                    root_lcb_stdevs=root_lcb_stdevs,
+                    root_lcb_minimum_visit_proportion=(
+                        root_lcb_minimum_visit_proportion
                     ),
                 )
                 if sequential_halving_candidate_count > 0
@@ -501,6 +566,12 @@ def run_arena(
                     adaptive_visit_margin_ratio=(
                         adaptive_visit_margin_ratio
                     ),
+                    adaptive_symmetry_value_spread_threshold=(
+                        adaptive_symmetry_value_spread_threshold
+                    ),
+                    adaptive_uncertainty_threshold=(
+                        adaptive_uncertainty_threshold
+                    ),
                     opponent_branch_count=opponent_branch_count,
                     root_evaluator=root_evaluator,
                     root_selection_visit_slack=(
@@ -529,6 +600,15 @@ def run_arena(
                     ),
                     use_q_value_normalization_at_root_only=(
                         use_q_value_normalization_at_root_only
+                    ),
+                    utility_stdev_prior=utility_stdev_prior,
+                    utility_stdev_prior_weight=(
+                        utility_stdev_prior_weight
+                    ),
+                    utility_stdev_scale=utility_stdev_scale,
+                    root_lcb_stdevs=root_lcb_stdevs,
+                    root_lcb_minimum_visit_proportion=(
+                        root_lcb_minimum_visit_proportion
                     ),
                 )
             )
@@ -599,6 +679,13 @@ def run_arena(
             game_state = next_state
 
         did_black_win = get_area_score(game_state) > 0
+        if search_session is not None:
+            adaptive_extension_count += (
+                search_session.adaptive_extension_count
+            )
+            adaptive_extra_simulation_count += (
+                search_session.adaptive_extra_simulation_count
+            )
         did_moka_win = (
             not did_moka_resign
             and did_black_win == is_moka_black
@@ -657,6 +744,8 @@ def run_arena(
         f"KataGoPasses={teacher_pass_count} "
         f"CapRepeats={capped_repeated_position_count} "
         f"CapUnique={capped_unique_position_count} "
+        f"AdaptiveRoots={adaptive_extension_count} "
+        f"AdaptiveExtra={adaptive_extra_simulation_count} "
         f"seconds={duration_seconds:.1f}"
     )
     return moka_win_count, kata_go_win_count, move_cap_count
@@ -704,6 +793,21 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--search-child-q-pseudo-count",
         type=float,
         default=SEARCH_CHILD_Q_PSEUDO_COUNT,
+    )
+    argument_parser.add_argument(
+        "--search-utility-stdev-prior",
+        type=float,
+        default=SEARCH_PUCT_UTILITY_STDEV_PRIOR,
+    )
+    argument_parser.add_argument(
+        "--search-utility-stdev-prior-weight",
+        type=float,
+        default=SEARCH_PUCT_UTILITY_STDEV_PRIOR_WEIGHT,
+    )
+    argument_parser.add_argument(
+        "--search-utility-stdev-scale",
+        type=float,
+        default=SEARCH_PUCT_UTILITY_STDEV_SCALE,
     )
     argument_parser.add_argument(
         "--search-evaluation-budget-extra-simulations",
@@ -758,6 +862,41 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=SEARCH_SCORE_VALUE_WEIGHT,
     )
     argument_parser.add_argument(
+        "--search-score-value-start-move",
+        type=int,
+        default=SEARCH_SCORE_VALUE_START_MOVE_COUNT,
+    )
+    argument_parser.add_argument(
+        "--search-action-value-prior-weight",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--search-optimistic-policy-weight",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--root-optimistic-policy-weight",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--search-uncertainty-coefficient",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--root-uncertainty-coefficient",
+        type=float,
+        default=0,
+    )
+    argument_parser.add_argument(
+        "--uncertainty-maximum-weight",
+        type=float,
+        default=SEARCH_UNCERTAINTY_MAXIMUM_WEIGHT,
+    )
+    argument_parser.add_argument(
         "--search-rollout-depth",
         type=int,
         default=SEARCH_ROLLOUT_DEPTH,
@@ -793,6 +932,16 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--adaptive-visit-margin",
         type=float,
         default=SEARCH_ADAPTIVE_VISIT_MARGIN_RATIO,
+    )
+    argument_parser.add_argument(
+        "--adaptive-symmetry-value-spread",
+        type=float,
+        default=SEARCH_ADAPTIVE_SYMMETRY_VALUE_SPREAD_THRESHOLD,
+    )
+    argument_parser.add_argument(
+        "--adaptive-uncertainty-threshold",
+        type=float,
+        default=SEARCH_ADAPTIVE_UNCERTAINTY_THRESHOLD,
     )
     argument_parser.add_argument(
         "--opponent-branches",
@@ -852,6 +1001,16 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--root-branches",
         type=int,
         default=SEARCH_ROOT_BRANCH_COUNT,
+    )
+    argument_parser.add_argument(
+        "--root-lcb-stdevs",
+        type=float,
+        default=SEARCH_ROOT_LCB_STDEVS,
+    )
+    argument_parser.add_argument(
+        "--root-lcb-minimum-visit-proportion",
+        type=float,
+        default=SEARCH_ROOT_LCB_MINIMUM_VISIT_PROPORTION,
     )
     argument_parser.add_argument(
         "--root-policy-temperature",
@@ -927,6 +1086,7 @@ def main() -> None:
         arguments.search_value_weight,
         arguments.search_area_value_weight,
         arguments.search_score_value_weight,
+        arguments.search_score_value_start_move,
         arguments.search_rollout_depth,
         arguments.sequential_halving_candidates,
         arguments.symmetry_ensemble,
@@ -936,6 +1096,7 @@ def main() -> None:
         arguments.symmetry_flip,
         arguments.adaptive_max_simulations,
         arguments.adaptive_visit_margin,
+        arguments.adaptive_symmetry_value_spread,
         arguments.global_pool,
         arguments.opponent_branches,
         arguments.root_symmetry_ensemble,
@@ -968,6 +1129,18 @@ def main() -> None:
         arguments.search_evaluation_budget_extra_simulations,
         arguments.shared_root_evaluator,
         arguments.global_residual,
+        arguments.search_action_value_prior_weight,
+        arguments.search_optimistic_policy_weight,
+        arguments.root_optimistic_policy_weight,
+        arguments.search_uncertainty_coefficient,
+        arguments.root_uncertainty_coefficient,
+        arguments.uncertainty_maximum_weight,
+        arguments.adaptive_uncertainty_threshold,
+        arguments.search_utility_stdev_prior,
+        arguments.search_utility_stdev_prior_weight,
+        arguments.search_utility_stdev_scale,
+        arguments.root_lcb_stdevs,
+        arguments.root_lcb_minimum_visit_proportion,
     )
 
 

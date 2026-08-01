@@ -25,6 +25,7 @@ from go_model.config import (
     DEFAULT_RANDOM_SEED,
     DISTILLATION_OPENING_OFFSET,
     KATAGO_SIMPLE_AREA_RULES,
+    KATAGO_SHORT_OPTIMISTIC_POLICY_OUTPUT_INDEX,
     KOMI_POINTS,
     MINIMUM_TEACHER_PASS_MOVE_COUNT,
     MID_GAME_MOVE_COUNT,
@@ -46,11 +47,26 @@ from go_model.config import (
     SEARCH_RESIGNATION_AREA_MARGIN_POINTS,
     SEARCH_ROOT_POLICY_TEMPERATURE,
     SEARCH_ROOT_SYMMETRY_GEOMETRIC_POLICY_WEIGHT,
+    STRONG_TEACHER_BATCH_SIZE,
 )
 from go_model.features import encode_moka_features
 from go_model.model import create_moka_network_for_checkpoint
 from go_model.search import MokaEvaluator, MokaSearchSession
 from go_model.teacher import KataGoTeacher
+
+
+@dataclass
+class AuxiliaryTargets:
+    ownership: np.ndarray
+    score: float
+    score_stdev: float
+    raw_value: float
+    raw_score_lead: float
+    raw_score_selfplay: float
+    raw_score_selfplay_stdev: float
+    short_winrate_error: float
+    short_score_error: float
+    variance_time_left: float
 
 
 @dataclass
@@ -62,8 +78,7 @@ class AnalysisTargets:
     child_features: list[np.ndarray]
     child_values: list[float]
     child_weights: list[float]
-    ownership: np.ndarray | None
-    score: float | None
+    auxiliary: AuxiliaryTargets | None
 
 
 class KataGoAnalysisEngine:
@@ -159,7 +174,19 @@ class KataGoAnalysisEngine:
 
     def close(self) -> None:
         self.standard_input.close()
-        self.process.wait(timeout=SEARCH_TEACHER_SHUTDOWN_TIMEOUT_SECONDS)
+        try:
+            self.process.wait(
+                timeout=SEARCH_TEACHER_SHUTDOWN_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            self.process.terminate()
+            try:
+                self.process.wait(
+                    timeout=SEARCH_TEACHER_SHUTDOWN_TIMEOUT_SECONDS
+                )
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
         self.error_thread.join(timeout=SEARCH_TEACHER_SHUTDOWN_TIMEOUT_SECONDS)
 
 
@@ -492,6 +519,95 @@ def validate_reanalysis_modes(
         )
 
 
+def validate_optimistic_policy_teacher(
+    checkpoint_path: Path | None,
+    source_path: Path | None,
+) -> None:
+    if (checkpoint_path is None) != (source_path is None):
+        raise ValueError(
+            "Optimistic-policy checkpoint and KataGo source must be provided together."
+        )
+
+
+def evaluate_optimistic_policies(
+    game_states: list[GameState],
+    checkpoint_path: Path,
+    source_path: Path,
+) -> np.ndarray:
+    from go_model.strong_teacher import StrongKataGoTeacher
+
+    teacher = StrongKataGoTeacher(
+        checkpoint_path,
+        source_path,
+        policy_output_index=KATAGO_SHORT_OPTIMISTIC_POLICY_OUTPUT_INDEX,
+    )
+    policy_batches: list[np.ndarray] = []
+
+    for batch_start in range(0, len(game_states), STRONG_TEACHER_BATCH_SIZE):
+        batch_end = batch_start + STRONG_TEACHER_BATCH_SIZE
+        evaluations = teacher.evaluate_batch(game_states[batch_start:batch_end])
+        policy_batches.append(
+            np.asarray(
+                [evaluation[0] for evaluation in evaluations],
+                dtype=np.float32,
+            )
+        )
+
+    return (
+        np.concatenate(policy_batches)
+        if policy_batches
+        else np.empty((0, POLICY_MOVE_COUNT), dtype=np.float32)
+    )
+
+
+def flatten_move_histories(
+    game_states: list[GameState],
+) -> tuple[np.ndarray, np.ndarray]:
+    move_counts = np.asarray(
+        [len(game_state.move_history) for game_state in game_states],
+        dtype=np.int32,
+    )
+    move_offsets = np.concatenate(
+        [
+            np.zeros(1, dtype=np.int32),
+            np.cumsum(move_counts, dtype=np.int32),
+        ]
+    )
+    moves = np.asarray(
+        [
+            move
+            for game_state in game_states
+            for move in game_state.move_history
+        ],
+        dtype=np.int16,
+    )
+    return moves, move_offsets
+
+
+def reconstruct_game_states(
+    moves: np.ndarray,
+    move_offsets: np.ndarray,
+) -> list[GameState]:
+    game_states: list[GameState] = []
+
+    for state_index in range(len(move_offsets) - 1):
+        game_state = GameState()
+
+        for move in moves[
+            move_offsets[state_index] : move_offsets[state_index + 1]
+        ]:
+            next_state = play_move(game_state, int(move))
+            if next_state is None:
+                raise ValueError(
+                    f"Move history {state_index} contains an illegal move."
+                )
+            game_state = next_state
+
+        game_states.append(game_state)
+
+    return game_states
+
+
 def create_analysis_query(
     game_id: int | str,
     moves: list[int],
@@ -527,15 +643,26 @@ def create_analysis_query(
 
 def extract_auxiliary_targets(
     response: dict,
-) -> tuple[np.ndarray, float]:
+) -> AuxiliaryTargets:
     ownership = np.asarray(response["ownership"], dtype=np.float32)
     if ownership.shape != (BOARD_AREA,):
         raise ValueError(
             f"Expected {BOARD_AREA} ownership values, received {ownership.shape}."
         )
-    return (
-        ownership.reshape(BOARD_SIZE, BOARD_SIZE),
-        float(response["rootInfo"]["scoreLead"]),
+    root_information = response["rootInfo"]
+    return AuxiliaryTargets(
+        ownership=ownership.reshape(BOARD_SIZE, BOARD_SIZE),
+        score=float(root_information["scoreLead"]),
+        score_stdev=float(root_information["scoreStdev"]),
+        raw_value=2 * float(root_information["rawWinrate"]) - 1,
+        raw_score_lead=float(root_information["rawLead"]),
+        raw_score_selfplay=float(root_information["rawScoreSelfplay"]),
+        raw_score_selfplay_stdev=float(
+            root_information["rawScoreSelfplayStdev"]
+        ),
+        short_winrate_error=float(root_information["rawStWrError"]),
+        short_score_error=float(root_information["rawStScoreError"]),
+        variance_time_left=float(root_information["rawVarTimeLeft"]),
     )
 
 
@@ -569,10 +696,10 @@ def extract_analysis_targets(
     if policy_sum == 0:
         return None
     policy /= policy_sum
-    ownership, score = (
+    auxiliary_targets = (
         extract_auxiliary_targets(response)
         if include_auxiliary_targets
-        else (None, None)
+        else None
     )
     return AnalysisTargets(
         policy=policy,
@@ -582,8 +709,7 @@ def extract_analysis_targets(
         child_features=child_features,
         child_values=child_values,
         child_weights=child_weights,
-        ownership=ownership,
-        score=score,
+        auxiliary=auxiliary_targets,
     )
 
 
@@ -612,11 +738,17 @@ def create_search_dataset(
     include_auxiliary_targets: bool,
     use_teacher_branches: bool,
     use_blunder_risk_reanalysis: bool,
+    optimistic_policy_checkpoint_path: Path | None = None,
+    teacher_source_path: Path | None = None,
 ) -> dict[str, np.ndarray]:
     validate_reanalysis_modes(
         use_selective_reanalysis,
         use_action_regret,
         use_blunder_risk_reanalysis,
+    )
+    validate_optimistic_policy_teacher(
+        optimistic_policy_checkpoint_path,
+        teacher_source_path,
     )
 
     if use_counterfactual_reanalysis and use_teacher_branches:
@@ -700,8 +832,8 @@ def create_search_dataset(
     child_root_indexes: list[int] = []
     absolute_turn_numbers: list[int] = []
     rollout_moves: list[int] = []
-    ownerships: list[np.ndarray] = []
-    scores: list[float] = []
+    auxiliary_targets: list[AuxiliaryTargets] = []
+    root_game_states: list[GameState] = []
     branch_parent_indexes: list[int] = []
     branch_queries: list[dict] = []
     branch_states: dict[int, GameState] = {}
@@ -762,6 +894,7 @@ def create_search_dataset(
                     [root_index] * len(targets.child_features)
                 )
                 features.append(encode_moka_features(game_state))
+                root_game_states.append(game_state.copy())
                 policies.append(targets.policy)
                 q_values.append(targets.q_values)
                 q_weights.append(targets.q_weights)
@@ -776,10 +909,9 @@ def create_search_dataset(
                 rollout_moves.append(rollout_move)
                 branch_parent_indexes.append(-1)
                 if include_auxiliary_targets:
-                    if targets.ownership is None or targets.score is None:
+                    if targets.auxiliary is None:
                         raise RuntimeError("Missing requested auxiliary targets.")
-                    ownerships.append(targets.ownership)
-                    scores.append(targets.score)
+                    auxiliary_targets.append(targets.auxiliary)
                 teacher_move = int(np.argmax(targets.policy))
                 branch_state = play_move(game_state, teacher_move)
                 if (
@@ -837,6 +969,7 @@ def create_search_dataset(
                     [root_index] * len(targets.child_features)
                 )
                 features.append(encode_moka_features(game_state))
+                root_game_states.append(game_state.copy())
                 policies.append(targets.policy)
                 q_values.append(targets.q_values)
                 q_weights.append(targets.q_weights)
@@ -847,10 +980,9 @@ def create_search_dataset(
                 rollout_moves.append(int(np.argmax(targets.policy)))
                 branch_parent_indexes.append(parent_index)
                 if include_auxiliary_targets:
-                    if targets.ownership is None or targets.score is None:
+                    if targets.auxiliary is None:
                         raise RuntimeError("Missing requested auxiliary targets.")
-                    ownerships.append(targets.ownership)
-                    scores.append(targets.score)
+                    auxiliary_targets.append(targets.auxiliary)
 
             print(
                 "branches "
@@ -969,6 +1101,18 @@ def create_search_dataset(
     finally:
         engine.close()
 
+    optimistic_policies = None
+    if (
+        optimistic_policy_checkpoint_path is not None
+        and teacher_source_path is not None
+    ):
+        optimistic_policies = evaluate_optimistic_policies(
+            root_game_states,
+            optimistic_policy_checkpoint_path,
+            teacher_source_path,
+        )
+    root_moves, root_move_offsets = flatten_move_histories(root_game_states)
+
     dataset = {
         "features": np.asarray(features, dtype=np.float16),
         "game_ids": np.asarray(game_ids, dtype=np.int32),
@@ -991,10 +1135,55 @@ def create_search_dataset(
         "child_values": np.asarray(child_values, dtype=np.float16),
         "child_weights": np.asarray(child_weights, dtype=np.float16),
         "values": np.asarray(values, dtype=np.float16),
+        "root_moves": root_moves,
+        "root_move_offsets": root_move_offsets,
     }
     if include_auxiliary_targets:
-        dataset["ownerships"] = np.asarray(ownerships, dtype=np.float16)
-        dataset["scores"] = np.asarray(scores, dtype=np.float16)
+        dataset["ownerships"] = np.asarray(
+            [targets.ownership for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+        dataset["scores"] = np.asarray(
+            [targets.score for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+        dataset["score_stdevs"] = np.asarray(
+            [targets.score_stdev for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+        dataset["raw_values"] = np.asarray(
+            [targets.raw_value for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+        dataset["raw_score_leads"] = np.asarray(
+            [targets.raw_score_lead for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+        dataset["raw_score_selfplays"] = np.asarray(
+            [targets.raw_score_selfplay for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+        dataset["raw_score_selfplay_stdevs"] = np.asarray(
+            [
+                targets.raw_score_selfplay_stdev
+                for targets in auxiliary_targets
+            ],
+            dtype=np.float16,
+        )
+        dataset["short_winrate_errors"] = np.asarray(
+            [targets.short_winrate_error for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+        dataset["short_score_errors"] = np.asarray(
+            [targets.short_score_error for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+        dataset["variance_time_lefts"] = np.asarray(
+            [targets.variance_time_left for targets in auxiliary_targets],
+            dtype=np.float16,
+        )
+    if optimistic_policies is not None:
+        dataset["optimistic_policies"] = optimistic_policies.astype(np.float16)
     if use_teacher_branches:
         dataset["branch_parent_indexes"] = np.asarray(
             branch_parent_indexes,
@@ -1049,6 +1238,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
     )
     argument_parser.add_argument("--moka-turns-only", action="store_true")
     argument_parser.add_argument("--auxiliary-targets", action="store_true")
+    argument_parser.add_argument(
+        "--optimistic-policy-checkpoint",
+        type=Path,
+    )
+    argument_parser.add_argument(
+        "--katago-source",
+        type=Path,
+    )
     argument_parser.add_argument("--teacher-branches", action="store_true")
     argument_parser.add_argument(
         "--rollout-simulations",
@@ -1103,6 +1300,8 @@ def main() -> None:
         arguments.auxiliary_targets,
         arguments.teacher_branches,
         arguments.blunder_risk_reanalysis,
+        arguments.optimistic_policy_checkpoint,
+        arguments.katago_source,
     )
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **dataset)

@@ -143,6 +143,7 @@ def generate_outcome_dataset(
     )
     features: list[np.ndarray] = []
     game_ids: list[int] = []
+    move_counts: list[int] = []
     next_colors: list[int] = []
     values: list[float] = []
     actions: list[int] = []
@@ -153,6 +154,7 @@ def generate_outcome_dataset(
     old_log_probabilities: list[float] = []
     teacher_action_advantages: list[float] = []
     teacher_policies: list[np.ndarray] = []
+    teacher_short_values: list[float] = []
     teacher_values: list[float] = []
     pending_indexes: dict[int, list[int]] = {}
     previous_position_indexes: dict[int, int] = {}
@@ -179,10 +181,20 @@ def generate_outcome_dataset(
             False,
         )
         opponent_evaluations = opponent.evaluate_batch(game_states)
+        guidance_auxiliary_evaluations = (
+            None
+            if guidance_teacher is opponent
+            else guidance_teacher.evaluate_batch_with_auxiliary(
+                game_states
+            )
+        )
         guidance_evaluations = (
             opponent_evaluations
-            if guidance_teacher is opponent
-            else guidance_teacher.evaluate_batch(game_states)
+            if guidance_auxiliary_evaluations is None
+            else [
+                (evaluation[0], evaluation[1])
+                for evaluation in guidance_auxiliary_evaluations
+            ]
         )
 
         for game_index in range(len(game_states) - 1, -1, -1):
@@ -191,6 +203,7 @@ def generate_outcome_dataset(
             position_index = len(features)
             features.append(encode_moka_features(game_state))
             game_ids.append(game_id)
+            move_counts.append(game_state.move_count)
             next_colors.append(game_state.next_color)
             values.append(0)
             legal_mask = np.zeros(POLICY_MOVE_COUNT, dtype=np.bool_)
@@ -202,6 +215,10 @@ def generate_outcome_dataset(
             moka_policy, moka_value = moka_evaluations[game_index]
             teacher_policy, teacher_value = guidance_evaluations[game_index]
             teacher_policies.append(teacher_policy)
+            if guidance_auxiliary_evaluations is not None:
+                teacher_short_values.append(
+                    guidance_auxiliary_evaluations[game_index][3]
+                )
             teacher_values.append(teacher_value)
             teacher_action_advantages.append(0)
             previous_position_index = previous_position_indexes.get(game_id)
@@ -348,12 +365,13 @@ def generate_outcome_dataset(
             print(f"completed {completed_game_count:,}/{game_count:,} games")
             last_reported_game_count = completed_game_count
 
-    return {
+    dataset = {
         "actions": np.asarray(actions, dtype=np.int16),
         "baselines": np.asarray(baselines, dtype=np.float16),
         "features": np.asarray(features, dtype=np.float16),
         "game_ids": np.asarray(game_ids, dtype=np.int32),
         "legal_masks": np.asarray(legal_masks, dtype=np.bool_),
+        "move_counts": np.asarray(move_counts, dtype=np.int16),
         "moka_action_masks": np.asarray(moka_action_masks, dtype=np.bool_),
         "optimization_masks": np.asarray(
             optimization_masks,
@@ -368,8 +386,15 @@ def generate_outcome_dataset(
             dtype=np.float16,
         ),
         "teacher_policies": np.asarray(teacher_policies, dtype=np.float16),
+        "teacher_values": np.asarray(teacher_values, dtype=np.float16),
         "values": np.asarray(values, dtype=np.float16),
     }
+    if teacher_short_values:
+        dataset["teacher_short_values"] = np.asarray(
+            teacher_short_values,
+            dtype=np.float16,
+        )
+    return dataset
 
 
 def create_argument_parser() -> argparse.ArgumentParser:
