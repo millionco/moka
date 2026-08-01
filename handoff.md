@@ -104,6 +104,7 @@ uv run python -m go_model.train \
   --batch-size 256 \
   --learning-rate 0.00001 \
   --seed 530 \
+  --game-pair-size 2 \
   --policy-preservation-weight 0.25 \
   --global-residual \
   --global-residual-adapter-only \

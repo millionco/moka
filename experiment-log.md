@@ -6968,3 +6968,71 @@ Before arena play, the exact candidate must improve new-corpus test policy loss 
 Collection completed all 64 games and produced 2,205 Moka decision positions from 64 unique game IDs. The archive contains finite features, visit-policy targets, sample weights, search Q values and weights, and scalar values. Stored policy sums range from 0.9995117 to 1.0 after float16 serialization. The 423,673-byte corpus has SHA-256 `3054722bc167ee6b51f8649bc629e5853d67293721c2d7f79a02bb881a84b885`.
 
 Training and offline arbitration have not started. The frozen candidate recipe, required datasets, accepted checkpoint, and b6c96 teacher are bundled under `handoff-assets/` for continuation on a clean machine.
+
+### Pre-arena split correction
+
+The first continuation invocation exposed a handoff-command mismatch before offline comparison or arena play. The preregistration requires complete paired-color games to define train, validation, and test buckets, but the copied command omitted `--game-pair-size 2` and therefore used the CLI default of one. With game IDs `0` through `63`, that default separated the two colors of each paired opening between validation and test instead of assigning the pair as one unit. The resulting provisional seed-530 checkpoint is discarded without gate evaluation. The same single seed, learning rate, epoch, target, and preservation recipe is rerun with `--game-pair-size 2`; this is a correction to the written frozen split invariant, not an additional candidate or hyperparameter selection.
+
+The corrected run used 5,042 training, 291 validation, and 263 test positions. Its one epoch reached training loss 1.9559, validation loss 2.2967, validation top-move agreement 62.5%, validation value MAE 0.5386, test loss 2.1159, test top-move agreement 61.2%, and test value MAE 0.3320. The float candidate is 434,411 bytes with SHA-256 `197a0655d65a75144b0f0528b63f8f8a380a48bb3b901c2922c6352e5bb1aa93`. Exact prefix materialization produced a 434,471-byte checkpoint with SHA-256 `7d880f13785d22879044b7d5875210cea08a750ff9a798bdd01e2398baf44f28`.
+
+Pure weighted cross-entropy, top-move agreement, and value MAE were then measured on complete paired-game test buckets:
+
+| Test domain                      | Metric        |   Accepted |  Candidate |       Delta |
+| :------------------------------- | :------------ | ---------: | ---------: | ----------: |
+| New 256-visit offset 9,550,000   | policy loss   | 2.00957190 | 2.01055210 | +0.00098020 |
+|                                  | top agreement |   60.4563% |   61.2167% |  +0.7605 pp |
+|                                  | value MAE     | 0.33486778 | 0.33199202 | -0.00287576 |
+| Prior 128-visit offset 5,400,000 | policy loss   | 1.77327079 | 1.77347711 | +0.00020632 |
+|                                  | top agreement |   68.1529% |   68.1529% |           0 |
+|                                  | value MAE     | 0.31593649 | 0.31474531 | -0.00119118 |
+| Independent offset 4,720,000     | policy loss   | 2.68956989 | 2.69186583 | +0.00229594 |
+|                                  | top agreement |   30.6452% |   29.0323% |  -1.6129 pp |
+|                                  | value MAE     | 0.39127470 | 0.36505982 | -0.02621488 |
+
+The exact tensor audit found identical parameter names, exactly 12 changed tensors, and zero changes outside `residual_blocks.3.global_*`, `residual_blocks.7.global_*`, and `residual_blocks.11.global_*`. Materialization is mechanically correct, but the candidate misses the primary requirement by worsening rather than improving new-corpus policy loss, and its independent policy loss exceeds the +0.001 safety ceiling. It is rejected before arena play. No alternate seed, rate, epoch, target mixture, or arena offset is consumed.
+
+## 2026-07-31 — Preregistered exact Gumbel root allocation
+
+The earlier sequential-halving experiments used a heuristic approximation: top-prior actions, equal round allocations, and raw `log(prior) + Q` ranking. They did not implement the completed-Q transformation or exact visit schedule from DeepMind's Gumbel AlphaZero work. The official implementation specifically recommends zero Gumbel scale for evaluation in perfect-information games and reports its largest gains at small simulation budgets. This is a different causal mechanism from increasing visits, ordinary PUCT retuning, or the rejected raw-Q halving path. [ICLR 2022 paper](https://openreview.net/forum?id=bERaNdoegnO), [official Mctx implementation](https://github.com/google-deepmind/mctx/blob/main/mctx/_src/policies.py), [official sequential-halving schedule](https://github.com/google-deepmind/mctx/blob/main/mctx/_src/seq_halving.py)
+
+Exactly one implementation candidate is frozen before measurement. At each real root it considers the 16 highest-prior legal actions, equivalent to Gumbel top-k with scale zero. It follows Mctx's exact sequential-halving considered-visit schedule. Root action scores are `log(prior) + sigma(completed Q)`. Visited actions use ordinary Moka root-perspective search Q. Unvisited actions use the mixed value formed from the root network value and the prior-weighted values of visited actions. Completed values are min-max normalized and multiplied by `0.1 × (50 + maximum child visits)`, matching Mctx defaults. Each allocated root visit runs one unchanged ordinary PUCT simulation below that action. Descendant selection, neural inference, symmetry aggregation, FPU, opponent width, rules, terminal scoring, and the total 256-evaluation budget remain accepted defaults. Retained subtrees contribute their Q estimates, while per-real-root halving allocation starts from zero so old visit imbalance cannot skip a candidate.
+
+Before arena play, a deterministic offline arbitration reuses the frozen seed-526 sample of 64 Black-to-move and 64 White-to-move positions from offset 9,000,000. Native b18c384's 512-visit top move remains the fixed target. The cached accepted 256-visit control matched 80 of 128 targets, split 41 Black and 39 White. Gumbel allocation must reach at least 84 matches, lose none for either color, and remain within 5% control runtime. No candidate-count, value-scale, max-visit initializer, Gumbel-scale, or mixed-value sweep is allowed.
+
+A passing offline candidate receives one 20-game paired screen at fresh opening offset 9,570,000. It must gain at least two wins, lose no wins as either color, introduce no cap or resignation, and remain within 5% runtime. A passing screen receives two untouched 40-game confirmations before any default or browser change.
+
+The replay harness first reconstructed paired-game test buckets, but its control matched only 66 of 128 targets rather than the authoritative cached 80. That invalid comparison was stopped before completion. Auditing the original arbitration recovered the exact rule: seed 526 sampled 64 positions of each color without replacement from the entire independent archive, not only one split bucket. This reproduced the cached control exactly at 80 matches, split 41 Black and 39 White, in 43.031 seconds.
+
+Exact Gumbel allocation matched only 40 of 128 teacher moves, split 20 Black and 20 White, in 44.595 seconds. It loses 40 aggregate matches, 21 Black matches, and 19 White matches while costing 3.6% runtime. It fails the offline strength gate decisively and receives no arena game, candidate-count sweep, value-scale sweep, noise experiment, or hybrid follow-up. The result confirms the earlier raw-Q halving diagnosis: Moka's compact value is not accurate enough for irreversible root elimination, even with official completed-Q calibration. The opt-in Gumbel session, CLI, constants, and tests are removed; accepted ordinary 256-visit PUCT remains unchanged.
+
+## 2026-07-31 — Search-leaf value diagnostic and preregistration
+
+The exact allocation experiments isolate a common failure mode: root search is being asked to compare states that Moka's compact value head did not learn accurately. A read-only diagnostic sampled eight roots per color from the independent offset-12,000,000 archive with seed 531, ran accepted 256-visit PUCT, recorded every unique descendant state evaluated by the network, and labeled the roots and leaves directly with native b18c384. It observed 3,243 unique search leaves from 16 roots.
+
+| Domain | Positions | Value MAE | Sign agreement | Correlation |
+| :----- | --------: | --------: | -------------: | ----------: |
+| Roots  |        16 |  0.251279 |        87.500% |    0.898300 |
+| Leaves |     3,243 |  0.335547 |        83.688% |    0.850761 |
+
+Leaf error is phase-dependent: early-game MAE is 0.611662 over 1,058 states, middle-game MAE is 0.402181 over 832 states, and late-game MAE is 0.078658 over 1,353 states. Root early-game MAE is likewise 0.577327 over six positions. Search therefore expands a distinct, difficult early- and midgame distribution whose value error is large enough to make extra visits and irreversible allocation actively misleading.
+
+One value-only candidate is frozen before collection. Seed 532 selects four root histories per complete game from the offset-12,000,000 archive, stratified at the nearest available 20%, 40%, 60%, and 80% move-depth quantiles. Accepted 256-visit PUCT records and deduplicates its actual descendant evaluations. Native b18c384 supplies direct scalar value targets; Moka's accepted policy is retained only as inert dataset metadata. Source game IDs remain attached so complete games define paired-color train, validation, and test buckets. An untouched offset-11,000,000 archive, seed 533, and one root per game form the independent leaf test set and are never used for training.
+
+The candidate starts from the accepted exact checkpoint and trains only `value_convolution`, `value_hidden`, and `value_output` for one exact-quantization-aware epoch, batch size 256, learning rate 0.00001, seed 534, paired-game split size two, and random board symmetries. The broad offset-6,050,000 b18 search corpus is supplemental root replay. No trunk, policy, global adapter, architecture, parameter-count, or browser-payload change is allowed; no alternate seed, rate, epoch count, phase weighting, or second candidate is permitted.
+
+Before search arbitration, the exact candidate must improve independent search-leaf MAE by at least 0.020 without losing sign agreement, improve its primary paired test-leaf MAE by at least 0.020, keep broad offset-6,050,000 root MAE within 0.001 and sign agreement unchanged or better, and keep independent offset-4,720,000 root MAE within 0.001. Every tensor outside the six value-head parameters must be byte-identical. A passing candidate must then improve the frozen seed-526 b18 top-move arbitration from 80 to at least 84 of 128 matches without losing either color and within 5% runtime. Only then does it receive a 20-game screen at fresh opening offset 9,580,000, requiring at least two added wins, neither color worse, no added cap or resignation, and runtime within 5%. A passing screen receives two untouched 40-game confirmations before promotion.
+
+The primary collection produced 57,566 unique leaves from 256 phase-stratified roots. Its compressed archive has SHA-256 `8ce1667d2347b722c1b67ad3cd299ea4811dd20feb655154a33d4e3c23cee9a3`. The untouched collection produced 15,434 unique leaves from 64 roots and has SHA-256 `8debe5f0bcbf19be90fd99eb2b5aa6abfa1591871cc7f2622f2ca650ab40d260`.
+
+The frozen one-epoch run reached training loss 0.2896, validation MAE 0.3067, and primary test MAE 0.2559. Exact prefix materialization changed exactly the six value-head tensors and no trunk, policy, or adapter tensor. The float candidate has SHA-256 `563ed93123c20544a1699c0e9b1204e3a1c158d52b303314b684e3897b35b92d`; the 434,471-byte exact candidate has SHA-256 `3b8ea35b858385018fe0dac66d0c24487c1336087fc0b3dc28887489f01f6601`.
+
+| Evaluation domain | Model | Positions | Value MAE | Sign agreement |
+| :---------------- | :---- | --------: | --------: | -------------: |
+| Primary paired test leaves | Accepted | 7,114 | 0.275346 | 87.279% |
+| | Candidate | 7,114 | 0.255887 | 88.347% |
+| Untouched offset-11M leaves | Accepted | 15,434 | 0.316425 | 87.346% |
+| | Candidate | 15,434 | 0.290261 | 89.523% |
+| Broad offset-6.05M root test | Accepted | 861 | 0.486263 | 84.088% |
+| | Candidate | 861 | 0.499724 | 79.907% |
+
+The candidate improves untouched leaf MAE by 0.026165 and sign agreement by 2.177 percentage points, confirming that the collected target distribution is learnable. It misses the primary improvement floor by 0.000541 and, more importantly, worsens broad-root MAE by 0.013460 while losing 4.181 percentage points of root sign agreement. It fails the root-safety gate decisively. No independent-root measurement, seed-526 search arbitration, arena game, alternate replay ratio, learning rate, epoch, or phase weighting is run. The accepted checkpoint remains unchanged. The reusable collector is retained because it exposes the search distribution without altering inference.
