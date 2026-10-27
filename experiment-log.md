@@ -5348,3 +5348,30 @@ Moka v1 was distilled mainly from ~50K greedy-b6c96 positions plus small search 
 1. Exported weights ≤ 300,000 bytes; JS runtime matches the exact INT8 round-trip checkpoint.
 2. Fresh 200-game arena against greedy b6c96 at 64 simulations (README setting), offsets 20,000,000 and 20,010,000, identical flags for v1 and v2: v2 must win more games than v1 and not regress either color.
 3. Head-to-head v2 versus v1 at 64 simulations, 100 paired games at offset 20,100,000: v2 must win at least 55.
+
+### Corpus and diagnosis
+
+b18 self-play (17 shards, ~180K positions) alone was not enough: an early checkpoint matched b18's top move 59% (v1: 58% on the same held-out games) but scored 19/100 against greedy b6c96 at 64 simulations on scratch offset 30,000,000 (v1: 48), with 19 resignations and 5 caps. It had not seen the positions greedy b6 creates. `go_model.onpolicy_generate` fixes this: Moka (v1 and the current v2, raw policy, early temperature 0.7, 10% sampled moves) plays greedy b6c96 from 0–4 sampled b6 opening moves, then b18 labels every position at 32 visits. KataGo is restarted per 100-game shard because the analysis process grows past 25 GB. With ~100K on-policy positions the interim checkpoint scored 50/100 on the scratch offset (v1 48) and led v1 23–17 in a 40-game scratch head-to-head.
+
+Final corpus: 17 self-play shards plus 58 on-policy shards (rounds driven by v1 + early v2, then v1 + interim v2), ~650K positions. Ten epochs; held-out test policy loss 1.972, top move 62.0%, value MAE 0.230.
+
+### Gate results (Mac mini, all v1 and v2 games on the same hardware)
+
+1. `dist/v2-final/moka-model.bin` is 260,048 bytes (235,109 gzipped); manifest 21,081. The JS runtime matches the exact INT8 round-trip checkpoint: same top move, value within 1e-4, maximum policy-probability difference 0.0013. **Pass.**
+2. 200 fresh games against greedy b6c96, 64 simulations:
+
+| Opening offset | v1 wins | v2 wins | v1 Black / White | v2 Black / White | v1 / v2 caps | v1 / v2 resigns |
+| -------------: | ------: | ------: | :--------------- | :--------------- | -----------: | --------------: |
+|     20,000,000 |      46 |      79 | 22 / 24          | 41 / 38          |        0 / 0 |           3 / 1 |
+|     20,010,000 |      52 |      80 | 24 / 28          | 38 / 42          |        0 / 0 |           7 / 0 |
+|      **Total** |  **98** | **159** | **46 / 52**      | **79 / 80**      |    **0 / 0** |      **10 / 1** |
+
+v2 adds 61 wins and improves both colors. **Pass.** (v1 scored 92 on the same offsets on the Mac Studio; MLX float differences between machines change a few games.)
+
+3. Head-to-head at 64 simulations, offset 20,100,000: **v2 85 – v1 15** (v2 44 as Black / 41 as White; zero resignations). **Pass.**
+
+Runtime: v2 arena blocks took ~985 s versus ~825 s for v1 (+19%) on the mini; browser inference cost scales with the ~2.3× parameter count.
+
+### Decision
+
+v2 passes every preregistered gate. Not yet promoted: `model/go-model.*`, the README, and the Million website are unchanged pending review.
