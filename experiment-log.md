@@ -5325,3 +5325,26 @@ The candidate improves both independent blocks, adds six Black and seven White w
 The promoted exact checkpoint is `moka-global-soup-exact-q50-int8-roundtrip.safetensors`, with SHA-256 `90db3d02bb1fe3f850c32b6c4b5b864f049220d1e05d128c4efd686dd5b0d954`. The browser binary remains 113,648 bytes and is 100,653 bytes under deterministic gzip. Its SHA-256 is `35c1e51cc9518a21e2f81cded7f69f41d22c80ca05522ed5e4056cb26d9ed053`; the manifest SHA-256 is `00927862de6c29749124b3257b6618156c07b930ba624e010601b90434c1340e`.
 
 The candidate browser runtime returned finite policy and value outputs in the isolated playtest. The checkpoint and browser artifact are promoted. The Million website remains untouched.
+## 2026-10-26 — Moka v2: scaled b18-distilled network (preregistration)
+
+### Constraint change
+
+The payload budget moves from 200 KB to 300 KB (`MAXIMUM_MODEL_BYTES = 300_000`). Every earlier family held the 105,353-parameter architecture fixed and closed on sub-noise deltas; the budget is now the lever.
+
+### Hypothesis
+
+Moka v1 was distilled mainly from ~50K greedy-b6c96 positions plus small search corpora. A 2.3× larger student (48-channel trunk, 24-channel bottleneck, 16 nested blocks, global adapters every four blocks: 244,529 parameters, 260,048 INT8 bytes) trained from scratch on a large corpus labelled by the native 9×9 KataGo b18c384nbt network will beat v1 in searched play.
+
+### Data
+
+`go_model.selfplay_generate`: b18 self-play through the KataGo analysis engine at 64 visits, 7 komi, area scoring. Openings sample 0–10 moves from the raw b18 policy; moves before 24 sample visits at temperature 0.6; 6% of later moves sample the raw policy; 70% of games may resign at |value| ≥ 0.94 for six plies. Every position stores the visit distribution, raw policy, search and raw value, score lead, ownership, and b18-judged outcome. Game ids bucket `% 10 == 0` validation and `== 1` test. No arena openings are used.
+
+### Training
+
+`go_model.scaled_train`: policy cross-entropy against 50% visits + 50% raw policy; value MSE against 70% search value + 30% outcome; training-only ownership (0.5) and score (0.1) heads that are not exported; random dihedral symmetry per batch; AdamW, cosine schedule.
+
+### Gates (frozen before any v2 game)
+
+1. Exported weights ≤ 300,000 bytes; JS runtime matches the exact INT8 round-trip checkpoint.
+2. Fresh 200-game arena against greedy b6c96 at 64 simulations (README setting), offsets 20,000,000 and 20,010,000, identical flags for v1 and v2: v2 must win more games than v1 and not regress either color.
+3. Head-to-head v2 versus v1 at 64 simulations, 100 paired games at offset 20,100,000: v2 must win at least 55.
