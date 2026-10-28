@@ -5325,6 +5325,7 @@ The candidate improves both independent blocks, adds six Black and seven White w
 The promoted exact checkpoint is `moka-global-soup-exact-q50-int8-roundtrip.safetensors`, with SHA-256 `90db3d02bb1fe3f850c32b6c4b5b864f049220d1e05d128c4efd686dd5b0d954`. The browser binary remains 113,648 bytes and is 100,653 bytes under deterministic gzip. Its SHA-256 is `35c1e51cc9518a21e2f81cded7f69f41d22c80ca05522ed5e4056cb26d9ed053`; the manifest SHA-256 is `00927862de6c29749124b3257b6618156c07b930ba624e010601b90434c1340e`.
 
 The candidate browser runtime returned finite policy and value outputs in the isolated playtest. The checkpoint and browser artifact are promoted. The Million website remains untouched.
+
 ## 2026-10-26 — Moka v2: scaled b18-distilled network (preregistration)
 
 ### Constraint change
