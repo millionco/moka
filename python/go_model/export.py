@@ -321,7 +321,7 @@ def export_model(
             "policyChannelCount": POLICY_CHANNEL_COUNT,
             "policyMoveCount": POLICY_MOVE_COUNT,
             "residualBlockCount": (
-                NESTED_RESIDUAL_BLOCK_COUNT
+                len(model.residual_blocks)
                 if use_nested_network or use_global_residual_network
                 else RESIDUAL_BLOCK_COUNT
             ),
@@ -331,12 +331,12 @@ def export_model(
                 else "standard"
             ),
             "scoreHiddenChannelCount": SCORE_HIDDEN_CHANNEL_COUNT,
-            "trunkChannelCount": TRUNK_CHANNEL_COUNT,
+            "trunkChannelCount": int(model.stem.weight.shape[0]),
             "valueChannelCount": VALUE_CHANNEL_COUNT,
     }
     if use_nested_network or use_global_residual_network:
-        architecture["bottleneckChannelCount"] = (
-            NESTED_BOTTLENECK_CHANNEL_COUNT
+        architecture["bottleneckChannelCount"] = int(
+            model.residual_blocks[0].reduce_convolution.weight.shape[0]
         )
     if use_global_residual_network:
         architecture["globalResidualBlockInterval"] = (
