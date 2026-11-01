@@ -5400,7 +5400,7 @@ Unlike the v2 gates, these comparisons were not frozen before the games. All gam
 
 v2 against v1, 100 more games at offset 20,120,000: **78–22**.
 
-Elo, with Moka v1 at 0: greedy b6c96 ≈ +70, Moka v2 ≈ +260 (95% CI +200 to +330), b18 raw policy ≈ +420.
+Elo, with Moka v1 at 0: greedy b6c96 ≈ +70, Moka v2 ≈ +260 (95% CI +200 to +330). Against b18 raw policy, v1 scores 9% (≈ −400) and v2 scores 21.5% (≈ −225), so the ratings are not fully transitive.
 
 ### Rounds
 

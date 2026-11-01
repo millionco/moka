@@ -13,7 +13,7 @@ With 64-visit full-symmetry search on fresh openings:
 | Moka v1, 100 games | — | 85 | 93 |
 | Moka v2, 200 games | — | — | 133 |
 
-The KataGo opponents play the top move of their raw policy. They do not search. Moka v2.1 is about 120 Elo stronger than Moka v2 (95% CI +70 to +170). It is still about 170 Elo weaker than the raw policy of the native 9×9 b18 network.
+The KataGo opponents play the top move of their raw policy. They do not search. Moka v2.1 is about 120 Elo stronger than Moka v2 (95% CI +70 to +170). It scores 22% against the raw policy of the native 9×9 b18 network, which is about 220 Elo weaker.
 
 Moka v2.1 was distilled from the native 9×9 KataGo b18 network. The training data has three parts: b18 self-play games, games of Moka against KataGo b6c96, and games of Moka against the raw policy of KataGo b18. KataGo b18 labelled each position in all three parts.
 
