@@ -2,17 +2,26 @@
 
 A cute Go-playing model.
 
-Moka v2 is a 244,529-parameter policy and value network for 9×9 Go. Its 260 KB INT8 weights run entirely in the browser. With 64-visit full-symmetry search, Moka v2 won 159 of 200 fresh games against KataGo b6c96. Moka v1 won 98 of the same 200 games. In 100 direct games, Moka v2 won 85 against Moka v1.
+Moka v2.1 is a 244,529-parameter policy and value network for 9×9 Go. Its 260 KB INT8 weights run entirely in the browser. It has the same architecture and size as Moka v2, with weights trained on more on-policy data.
 
-The KataGo b6c96 opponent plays the top move of its raw policy. It does not search.
+With 64-visit full-symmetry search on fresh openings:
 
-Moka v2 was distilled from the native 9×9 KataGo b18 network. The training data has two parts: b18 self-play games, and games of Moka against KataGo b6c96. KataGo b18 labelled each position in both parts.
+| Opponent | Moka v1 | Moka v2 | Moka v2.1 |
+| :-- | --: | --: | --: |
+| KataGo b6c96, raw policy, 200 games | 98 | 159 | 152 |
+| KataGo b18, raw policy, 200 games | — | 43 | 44 |
+| Moka v1, 100 games | — | 85 | 93 |
+| Moka v2, 200 games | — | — | 133 |
+
+The KataGo opponents play the top move of their raw policy. They do not search. Moka v2.1 is about 120 Elo stronger than Moka v2 (95% CI +70 to +170). It scores 22% against the raw policy of the native 9×9 b18 network, which is about 220 Elo weaker.
+
+Moka v2.1 was distilled from the native 9×9 KataGo b18 network. The training data has three parts: b18 self-play games, games of Moka against KataGo b6c96, and games of Moka against the raw policy of KataGo b18. KataGo b18 labelled each position in all three parts.
 
 ## Browser payload
 
 | Path                | Weights | Runtime | Total load |
 | ------------------- | ------: | ------: | ---------: |
-| Moka v2 · INT8      |  235 KB |    4 KB |     239 KB |
+| Moka v2.1 · INT8    |  234 KB |    4 KB |     238 KB |
 | Moka v1 · INT8      |  100 KB |    4 KB |     103 KB |
 | KataGo b6c96 · ONNX |  4.1 MB | 12.8 MB |    17.0 MB |
 
@@ -143,7 +152,7 @@ Moka v2 needs KataGo with a Metal or CUDA backend and the native 9×9 b18 networ
    uv run python -m go_model.selfplay_generate --games 3000 --visits 64
    ```
 
-2. Generate on-policy positions. Moka plays KataGo b6c96, and b18 labels each position:
+2. Generate on-policy positions. Moka plays KataGo b6c96, and b18 labels each position. Add `--opponent-katago-model teachers/kata9x9-native/kata9x9-b18c384nbt-20231025.bin.gz` to make Moka play the raw policy of b18 instead:
 
    ```sh
    uv run python -m go_model.onpolicy_generate \
@@ -168,13 +177,20 @@ Moka v2 needs KataGo with a Metal or CUDA backend and the native 9×9 b18 networ
    uv run go-export --checkpoint checkpoints/moka-v2-int8.safetensors
    ```
 
-To get more on-policy data, do step 2 again with the new checkpoint added to `--moka-checkpoints`. Moka v2 used two rounds.
+To get more on-policy data, do step 2 again with the new checkpoint added to `--moka-checkpoints`. Moka v2 used two rounds against b6c96. Moka v2.1 added one more round against b6c96 and one round against b18.
 
 Compare two checkpoints in direct games:
 
 ```sh
 uv run python -m go_model.headtohead --first NEW.safetensors --second OLD.safetensors \
   --games 100 --simulations 64 --opening-offset 20100000
+```
+
+Play a checkpoint against the KataGo analysis engine. `--visits 1` makes KataGo play its raw policy:
+
+```sh
+uv run python -m go_model.katago_match --checkpoint NEW.safetensors \
+  --games 100 --visits 1 --opening-offset 20040000
 ```
 
 ## Build the browser package

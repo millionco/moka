@@ -5376,3 +5376,68 @@ Runtime: v2 arena blocks took ~985 s versus ~825 s for v1 (+19%) on the mini; br
 ### Decision
 
 v2 passes every preregistered gate. Not yet promoted: `model/go-model.*`, the README, and the Million website are unchanged pending review.
+
+## Moka v2.1: more on-policy rounds (2026-10-31)
+
+### Question
+
+Do more on-policy rounds make Moka v2 stronger at the same 260 KB size? Can Moka beat the raw policy of the native 9×9 KataGo b18 network?
+
+Unlike the v2 gates, these comparisons were not frozen before the games. All games ran on the Mac mini with 64-simulation search, the same flags as the v2 gates.
+
+### New tools
+
+- `go_model.katago_match`: plays a Moka checkpoint against the KataGo analysis engine. `--visits 1` gives the raw policy of the KataGo network.
+- `go_model.onpolicy_generate --opponent-katago-model`: Moka plays the raw policy of a KataGo network instead of greedy b6c96. A second analysis process serves the opponent moves and restarts every shard.
+
+### Baselines
+
+| Opponent | Moka v1 | Moka v2 |
+| :-- | --: | --: |
+| greedy b6c96, 400 games, offsets 20,020,000 and 20,030,000 | 169 | 288 |
+| b18 raw policy, 100 games, offset 20,040,000 | 9 | 27 |
+| b18 raw policy, 100 games, offset 20,060,000 | — | 16 |
+
+v2 against v1, 100 more games at offset 20,120,000: **78–22**.
+
+Elo, with Moka v1 at 0: greedy b6c96 ≈ +70, Moka v2 ≈ +260 (95% CI +200 to +330). Against b18 raw policy, v1 scores 9% (≈ −400) and v2 scores 21.5% (≈ −225), so the ratings are not fully transitive.
+
+### Rounds
+
+| Round | Driver | Opponent | Label visits | Games | Positions |
+| :-- | :-- | :-- | --: | --: | --: |
+| d | v2 | greedy b6c96 | 32 | 4,000 | 276,970 |
+| e | v2 | b18 raw policy | 32 | 4,000 | 204,090 |
+| f | round-4 model | b18 raw policy | 64 | 4,000 | 197,641 |
+
+### Candidates
+
+| Candidate | Training | vs v2 | vs b18 raw, 200 games |
+| :-- | :-- | --: | --: |
+| round 3 | scratch, self-play + rounds a–d, 10 epochs | 52–48 | — (24/100 at 20,040,000) |
+| **round 4 (v2.1)** | scratch, self-play + rounds a–e, 10 epochs | **70–30, 63–37** | **44** (v2: 43) |
+| round 4, fine-tuned | round-3 weights, self-play + rounds d–e, 4 epochs, lr 5e-4 | 65–35 | 39 |
+| round 5 | scratch, self-play + rounds a–f, 12 epochs | 68–32 (46–54 vs round 4) | 41 |
+
+Head-to-head offsets: round 3 20,110,000; round 4 20,130,000 and 20,140,000; round 5 20,150,000 and 20,160,000. b18 offsets: 20,040,000 and 20,060,000.
+
+### Round-4 model (v2.1) checks
+
+- Exported weights: 260,048 bytes (233,569 gzipped). The JS runtime and the INT8 checkpoint give the same top move in 20 of 20 random positions. The largest policy-probability difference is 0.0039 and the largest value difference is 0.0055. Moka v2 gives 0.0035 and 0.0056 on the same positions.
+- greedy b6c96, offsets 20,000,000 and 20,010,000: 75 + 77 = **152** (v2: 159, v1: 98). Black 76 / White 76.
+- Moka v1, offset 20,100,000: **93–7** (v2: 85–15).
+- Moka v2: **133–67** in 200 games, about +120 Elo (95% CI +70 to +170).
+
+### Search depth against b18
+
+Round-4 model against b18 raw policy, offset 20,060,000:
+
+| Simulations | 64 | 128 | 256 | 512 |
+| :-- | --: | --: | --: | --: |
+| Wins of 100 | 21 | 20 | 28 | 36 |
+
+Each doubling adds about 8 wins. An even score would need about 2,000 to 4,000 simulations per move.
+
+### Decision
+
+The round-4 model becomes Moka v2.1. It is clearly stronger than v2 against Moka and equal against both KataGo opponents. Rounds against b18 did not increase the score against b18 itself. Round 5 added nothing. At 260 KB the network capacity is the probable limit. A larger size budget is the next lever for beating b18.
