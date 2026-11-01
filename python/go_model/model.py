@@ -48,28 +48,32 @@ class ResidualBlock(nn.Module):
 
 
 class NestedBottleneckBlock(nn.Module):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        trunk_channel_count: int = TRUNK_CHANNEL_COUNT,
+        bottleneck_channel_count: int = NESTED_BOTTLENECK_CHANNEL_COUNT,
+    ) -> None:
         super().__init__()
         self.reduce_convolution = nn.Conv2d(
-            TRUNK_CHANNEL_COUNT,
-            NESTED_BOTTLENECK_CHANNEL_COUNT,
+            trunk_channel_count,
+            bottleneck_channel_count,
             kernel_size=1,
         )
         self.first_spatial_convolution = nn.Conv2d(
-            NESTED_BOTTLENECK_CHANNEL_COUNT,
-            NESTED_BOTTLENECK_CHANNEL_COUNT,
+            bottleneck_channel_count,
+            bottleneck_channel_count,
             kernel_size=3,
             padding=1,
         )
         self.second_spatial_convolution = nn.Conv2d(
-            NESTED_BOTTLENECK_CHANNEL_COUNT,
-            NESTED_BOTTLENECK_CHANNEL_COUNT,
+            bottleneck_channel_count,
+            bottleneck_channel_count,
             kernel_size=3,
             padding=1,
         )
         self.expand_convolution = nn.Conv2d(
-            NESTED_BOTTLENECK_CHANNEL_COUNT,
-            TRUNK_CHANNEL_COUNT,
+            bottleneck_channel_count,
+            trunk_channel_count,
             kernel_size=1,
         )
 
@@ -81,15 +85,19 @@ class NestedBottleneckBlock(nn.Module):
 
 
 class GlobalNestedBottleneckBlock(NestedBottleneckBlock):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        trunk_channel_count: int = TRUNK_CHANNEL_COUNT,
+        bottleneck_channel_count: int = NESTED_BOTTLENECK_CHANNEL_COUNT,
+    ) -> None:
+        super().__init__(trunk_channel_count, bottleneck_channel_count)
         self.global_pooling_hidden = nn.Linear(
-            NESTED_BOTTLENECK_CHANNEL_COUNT * 2,
+            bottleneck_channel_count * 2,
             GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT,
         )
         self.global_bias_output = nn.Linear(
             GLOBAL_RESIDUAL_HIDDEN_CHANNEL_COUNT,
-            NESTED_BOTTLENECK_CHANNEL_COUNT,
+            bottleneck_channel_count,
         )
         self.global_bias_output.weight = mx.zeros_like(
             self.global_bias_output.weight
@@ -243,25 +251,34 @@ class MokaNetwork(nn.Module):
 
 
 class MokaNestedNetwork(MokaNetwork):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        trunk_channel_count: int = TRUNK_CHANNEL_COUNT,
+        bottleneck_channel_count: int = NESTED_BOTTLENECK_CHANNEL_COUNT,
+        residual_block_count: int = NESTED_RESIDUAL_BLOCK_COUNT,
+    ) -> None:
         nn.Module.__init__(self)
+        self.trunk_channel_count = trunk_channel_count
+        self.bottleneck_channel_count = bottleneck_channel_count
+        self.residual_block_count = residual_block_count
         self.stem = nn.Conv2d(
             INPUT_PLANE_COUNT,
-            TRUNK_CHANNEL_COUNT,
+            trunk_channel_count,
             kernel_size=3,
             padding=1,
         )
         self.residual_blocks = [
-            NestedBottleneckBlock() for _ in range(NESTED_RESIDUAL_BLOCK_COUNT)
+            NestedBottleneckBlock(trunk_channel_count, bottleneck_channel_count)
+            for _ in range(residual_block_count)
         ]
         self.policy_convolution = nn.Conv2d(
-            TRUNK_CHANNEL_COUNT,
+            trunk_channel_count,
             POLICY_CHANNEL_COUNT,
             kernel_size=1,
         )
         self.policy_linear = nn.Linear(POLICY_CHANNEL_COUNT * 81, POLICY_MOVE_COUNT)
         self.value_convolution = nn.Conv2d(
-            TRUNK_CHANNEL_COUNT,
+            trunk_channel_count,
             VALUE_CHANNEL_COUNT,
             kernel_size=1,
         )
@@ -328,8 +345,15 @@ class MokaGlobalResidualNetwork(MokaNestedNetwork):
     def __init__(
         self,
         global_residual_block_interval: int = GLOBAL_RESIDUAL_BLOCK_INTERVAL,
+        trunk_channel_count: int = TRUNK_CHANNEL_COUNT,
+        bottleneck_channel_count: int = NESTED_BOTTLENECK_CHANNEL_COUNT,
+        residual_block_count: int = NESTED_RESIDUAL_BLOCK_COUNT,
     ) -> None:
-        super().__init__()
+        super().__init__(
+            trunk_channel_count,
+            bottleneck_channel_count,
+            residual_block_count,
+        )
         if global_residual_block_interval <= 0:
             raise ValueError(
                 "Global-residual block interval must be positive."
@@ -339,11 +363,15 @@ class MokaGlobalResidualNetwork(MokaNestedNetwork):
         )
         self.residual_blocks = [
             (
-                GlobalNestedBottleneckBlock()
+                GlobalNestedBottleneckBlock(
+                    trunk_channel_count, bottleneck_channel_count
+                )
                 if (block_index + 1) % global_residual_block_interval == 0
-                else NestedBottleneckBlock()
+                else NestedBottleneckBlock(
+                    trunk_channel_count, bottleneck_channel_count
+                )
             )
-            for block_index in range(NESTED_RESIDUAL_BLOCK_COUNT)
+            for block_index in range(residual_block_count)
         ]
 
 
@@ -726,7 +754,21 @@ def create_moka_network(
     use_global_value_network: bool = False,
     use_global_score_network: bool = False,
     use_gated_global_residual_network: bool = False,
+    network_dimensions: tuple[int, int, int] | None = None,
 ) -> MokaNetwork:
+    if network_dimensions is not None and network_dimensions != (
+        TRUNK_CHANNEL_COUNT,
+        NESTED_BOTTLENECK_CHANNEL_COUNT,
+        NESTED_RESIDUAL_BLOCK_COUNT,
+    ):
+        if use_global_residual_network:
+            return MokaGlobalResidualNetwork(
+                global_residual_block_interval, *network_dimensions
+            )
+        if use_nested_network:
+            return MokaNestedNetwork(*network_dimensions)
+        raise ValueError("Scaled checkpoints require a nested network.")
+
     if use_gated_global_residual_network:
         return MokaGatedGlobalResidualNetwork(
             global_residual_block_interval
@@ -787,12 +829,34 @@ def get_checkpoint_global_residual_block_interval(
     if block_numbers != list(
         range(
             block_interval,
-            NESTED_RESIDUAL_BLOCK_COUNT + 1,
+            get_checkpoint_residual_block_count(parameters) + 1,
             block_interval,
         )
     ):
         raise ValueError("Unsupported irregular global-residual checkpoint.")
     return block_interval
+
+
+def get_checkpoint_residual_block_count(parameters: dict) -> int:
+    return 1 + max(
+        int(parameter_name.split(".")[1])
+        for parameter_name in parameters
+        if parameter_name.startswith("residual_blocks.")
+    )
+
+
+def get_checkpoint_network_dimensions(
+    checkpoint_path: str,
+) -> tuple[int, int, int] | None:
+    parameters = mx.load(checkpoint_path)
+    reduce_name = "residual_blocks.0.reduce_convolution.weight"
+    if reduce_name not in parameters or "stem.weight" not in parameters:
+        return None
+    return (
+        int(parameters["stem.weight"].shape[0]),
+        int(parameters[reduce_name].shape[0]),
+        get_checkpoint_residual_block_count(parameters),
+    )
 
 
 def checkpoint_uses_nested_network(checkpoint_path: str) -> bool:
@@ -874,4 +938,5 @@ def create_moka_network_for_checkpoint(
                 checkpoint_path
             )
         ),
+        get_checkpoint_network_dimensions(checkpoint_path),
     )

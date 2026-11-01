@@ -2,18 +2,21 @@
 
 A cute Go-playing model.
 
-Moka v1 is a 105,353-parameter policy and value network for 9×9 Go. Its 114 KB INT8 weights run entirely in the browser. With 64-visit full-symmetry search, this artifact won 95 of 200 fresh games against KataGo b6c96, compared with 78 for the previous model on the same openings.
+Moka v2 is a 244,529-parameter policy and value network for 9×9 Go. Its 260 KB INT8 weights run entirely in the browser. With 64-visit full-symmetry search, Moka v2 won 159 of 200 fresh games against KataGo b6c96. Moka v1 won 98 of the same 200 games. In 100 direct games, Moka v2 won 85 against Moka v1.
 
-Moka was distilled from KataGo b6c96 using teacher games and positions reached by Moka’s own rollouts.
+The KataGo b6c96 opponent plays the top move of its raw policy. It does not search.
+
+Moka v2 was distilled from the native 9×9 KataGo b18 network. The training data has two parts: b18 self-play games, and games of Moka against KataGo b6c96. KataGo b18 labelled each position in both parts.
 
 ## Browser payload
 
 | Path                | Weights | Runtime | Total load |
 | ------------------- | ------: | ------: | ---------: |
+| Moka v2 · INT8      |  235 KB |    4 KB |     239 KB |
 | Moka v1 · INT8      |  100 KB |    4 KB |     103 KB |
 | KataGo b6c96 · ONNX |  4.1 MB | 12.8 MB |    17.0 MB |
 
-Moka’s browser path is about 165× smaller than the teacher path. The point is not to replace KataGo. It is to put a learned Go player inside an ordinary webpage.
+Weights sizes are gzipped. The Moka v2 browser path is about 70× smaller than the teacher path. The point is not to replace KataGo. It is to put a learned Go player inside an ordinary webpage.
 
 ## Browser performance
 
@@ -26,7 +29,9 @@ Moka runs inference in a Web Worker, which keeps model execution off the main th
 | p50 inference  |  8.8 ms |
 | p95 inference  |  9.6 ms |
 
-These are the medians of five Chromium runs on Apple Silicon. Each run measured 100 positions after 10 warmups. Latency includes Worker messaging; inference stays off the main thread.
+These are the Moka v1 medians of five Chromium runs on Apple Silicon. Each run measured 100 positions after 10 warmups. Latency includes Worker messaging; inference stays off the main thread.
+
+Moka v2 needs more compute for each inference. In Node.js on an Apple M5 Max, the same runtime took 10.8 ms for Moka v2 and 4.1 ms for Moka v1 (mean of 100 positions, median of five runs). Expect browser latency for Moka v2 to be approximately 2.6× the values in the table.
 
 ## Embed Moka on a site
 
@@ -130,12 +135,46 @@ Place KataGo b6c96 at `teachers/katago-b6c96.onnx`.
 
 ## Train Moka
 
-Generate positions, train the network, and export its browser weights.
+Moka v2 needs KataGo with a Metal or CUDA backend and the native 9×9 b18 network at `teachers/kata9x9-native/kata9x9-b18c384nbt-20231025.bin.gz`.
+
+1. Generate b18 self-play positions:
+
+   ```sh
+   uv run python -m go_model.selfplay_generate --games 3000 --visits 64
+   ```
+
+2. Generate on-policy positions. Moka plays KataGo b6c96, and b18 labels each position:
+
+   ```sh
+   uv run python -m go_model.onpolicy_generate \
+     --moka-checkpoints checkpoints/moka-global-soup-exact-q50-int8-roundtrip.safetensors \
+     --games 3000 --visits 32
+   ```
+
+3. Train the network:
+
+   ```sh
+   uv run python -m go_model.scaled_train \
+     --data "data/selfplay/*.npz" "data/onpolicy/*.npz" \
+     --checkpoint checkpoints/moka-v2.safetensors --epochs 10
+   ```
+
+4. Round the weights to INT8 and export the browser weights:
+
+   ```sh
+   uv run python -m go_model.quantization \
+     --checkpoint checkpoints/moka-v2.safetensors \
+     --output checkpoints/moka-v2-int8.safetensors
+   uv run go-export --checkpoint checkpoints/moka-v2-int8.safetensors
+   ```
+
+To get more on-policy data, do step 2 again with the new checkpoint added to `--moka-checkpoints`. Moka v2 used two rounds.
+
+Compare two checkpoints in direct games:
 
 ```sh
-uv run go-generate --positions 50000
-uv run go-train --data data/katago-distillation.npz --epochs 30
-uv run go-export
+uv run python -m go_model.headtohead --first NEW.safetensors --second OLD.safetensors \
+  --games 100 --simulations 64 --opening-offset 20100000
 ```
 
 ## Build the browser package
