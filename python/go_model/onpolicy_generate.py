@@ -60,6 +60,22 @@ def choose_move(
     return int(selectable_moves[int(np.argmax(logits[selectable_moves]))])
 
 
+class KataGoPolicyOpponent:
+    """Raw-policy KataGo opponent served by the analysis engine (one visit per move)."""
+
+    def __init__(self, analysis: KataGoAnalysisProcess) -> None:
+        self.analysis = analysis
+
+    def evaluate(self, game_state: GameState) -> tuple[np.ndarray, float]:
+        query = create_query(0, list(game_state.move_history), 1)
+        query["analyzeTurns"] = [game_state.move_count]
+        query["includeOwnership"] = False
+        self.analysis.send(query)
+        response = self.analysis.receive()
+        policy = np.maximum(np.asarray(response["policy"], dtype=np.float32), 0)
+        return policy / max(float(policy.sum()), 1e-8), 0.0
+
+
 def play_game(
     random_generator: np.random.Generator,
     moka_model,
@@ -153,7 +169,7 @@ def run(arguments: argparse.Namespace) -> None:
         model.load_weights(str(checkpoint))
         model.eval()
         moka_models.append(model)
-    teacher = KataGoTeacher(arguments.opponent)
+    teacher = None if arguments.opponent_katago_model else KataGoTeacher(arguments.opponent)
     arguments.output_directory.mkdir(parents=True, exist_ok=True)
     start_time = time.time()
     position_count = 0
@@ -162,6 +178,12 @@ def run(arguments: argparse.Namespace) -> None:
         analysis = KataGoAnalysisProcess(
             arguments.katago, arguments.config, arguments.model, arguments.threads
         )
+        opponent_analysis = None
+        if arguments.opponent_katago_model:
+            opponent_analysis = KataGoAnalysisProcess(
+                arguments.katago, arguments.config, arguments.opponent_katago_model, 4
+            )
+            teacher = KataGoPolicyOpponent(opponent_analysis)
         final_states = {}
         for game_offset in range(arguments.shard_games):
             game_id = first_game_id + game_offset
@@ -179,6 +201,8 @@ def run(arguments: argparse.Namespace) -> None:
             response = analysis.receive()
             responses[int(response["id"])][int(response["turnNumber"])] = response
         analysis.close()
+        if opponent_analysis is not None:
+            opponent_analysis.close()
         records = [
             record
             for game_id, final_state in final_states.items()
@@ -197,6 +221,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     argument_parser = create_selfplay_argument_parser()
     argument_parser.add_argument("--moka-checkpoints", type=Path, nargs="+", required=True)
     argument_parser.add_argument("--opponent", type=Path, default=Path("teachers/katago-b6c96.onnx"))
+    argument_parser.add_argument("--opponent-katago-model", type=Path)
     argument_parser.set_defaults(prefix="onpolicy", output_directory=Path("data/onpolicy"), shard_games=100)
     return argument_parser
 
